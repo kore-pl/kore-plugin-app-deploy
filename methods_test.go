@@ -15,8 +15,8 @@ func TestDispatchMethods(t *testing.T) {
 		params string
 		want   string
 	}{
-		{"deploy.templates", `{}`, `"count":3`},
-		{"deploy.create", `{"template":"wordpress","target":"sites/blog"}`, `"applied":false`},
+		{"app-deploy.templates", `{}`, `"count":3`},
+		{"app-deploy.create", `{"template":"wordpress","target":"sites/blog"}`, `"applied":false`},
 	}
 	for _, c := range cases {
 		req := &pluginapi.Request{
@@ -43,9 +43,11 @@ func TestDispatchReject(t *testing.T) {
 		params string
 		code   string
 	}{
-		{"deploy.create", `{"template":"drupal","target":"sites/blog"}`, pluginapi.E_INVALID},
-		{"deploy.create", `{"template":"wordpress","target":"../../etc/passwd"}`, pluginapi.E_INVALID},
-		{"deploy.exec", `{}`, pluginapi.E_NOTFOUND},
+		{"app-deploy.create", `{"template":"drupal","target":"sites/blog"}`, pluginapi.E_INVALID},
+		{"app-deploy.create", `{"template":"wordpress","target":"../../etc/passwd"}`, pluginapi.E_INVALID},
+		{"app-deploy.exec", `{}`, pluginapi.E_NOTFOUND},
+		{"deploy.templates", `{}`, pluginapi.E_NOTFOUND}, // 旧域，域必须等于插件 id
+		{"templates", `{}`, pluginapi.E_NOTFOUND},        // 裸动词，v0.1.0 起不兼容
 	}
 	for _, c := range cases {
 		req := &pluginapi.Request{

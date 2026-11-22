@@ -42,7 +42,7 @@ type Executor interface {
 	Create(template, target string) (bool, error)
 }
 
-// Template 是 deploy.templates 返回的一项模板元信息。
+// Template 是 app-deploy.templates 返回的一项模板元信息。
 type Template struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -57,13 +57,13 @@ type createParams struct {
 	Target   string `json:"target"`
 }
 
-// TemplatesResult 是 deploy.templates 的结构化结果。
+// TemplatesResult 是 app-deploy.templates 的结构化结果。
 type TemplatesResult struct {
 	Templates []Template `json:"templates"`
 	Count     int        `json:"count"`
 }
 
-// CreateResult 是 deploy.create 的结构化结果；applied=false 表示骨架口径未真部署。
+// CreateResult 是 app-deploy.create 的结构化结果；applied=false 表示骨架口径未真部署。
 type CreateResult struct {
 	Template string `json:"template"`
 	Target   string `json:"target"`

@@ -6,7 +6,7 @@ import (
 	"github.com/pengtang1024/kore/pkg/pluginapi"
 )
 
-// callCreate 处理 deploy.create：校验模板白名单与目标路径后返回结构化占位结果。
+// callCreate 处理 app-deploy.create：校验模板白名单与目标路径后返回结构化占位结果。
 // 骨架口径不真拉取/部署，applied 恒为 false。
 func callCreate(raw json.RawMessage, root string, exec Executor) (json.RawMessage, *pluginapi.Error) {
 	var p createParams

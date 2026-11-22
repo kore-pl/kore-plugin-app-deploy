@@ -27,14 +27,14 @@ func Call(method string, params json.RawMessage, root string, exec Executor) (js
 	return nil, errNotFound(method)
 }
 
-// businessVerb 把 deploy.<verb> / app-deploy.<verb> 或裸 <verb> 归一为动词名。
+// methodPrefix 是方法名的插件域前缀：协议要求 `<plugin-id>.<action>`（PLUGIN-PROTOCOL §7.2）。
+const methodPrefix = "app-deploy."
+
+// businessVerb 把 app-deploy.<verb> 归一为动词名；域不是本插件 id 的一律拒绝（不再接受裸动词）。
 func businessVerb(method string) (string, bool) {
-	verb := method
-	for _, prefix := range []string{"deploy.", "app-deploy."} {
-		if strings.HasPrefix(method, prefix) {
-			verb = strings.TrimPrefix(method, prefix)
-			break
-		}
+	verb, ok := strings.CutPrefix(method, methodPrefix)
+	if !ok {
+		return "", false
 	}
 	switch verb {
 	case "templates", "create":

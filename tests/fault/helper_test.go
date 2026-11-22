@@ -31,8 +31,8 @@ var methods = []struct {
 	method string
 	params string
 }{
-	{"templates", "deploy.templates", `{}`},
-	{"create", "deploy.create", `{"template":"wordpress","target":"sites/blog"}`},
+	{"templates", "app-deploy.templates", `{}`},
+	{"create", "app-deploy.create", `{"template":"wordpress","target":"sites/blog"}`},
 }
 
 // assertFault 对每个方法注入故障，断言返回 nil 结果 + 预期的协议错误码与类别关键词。

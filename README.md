@@ -6,13 +6,13 @@
 
 - `kore.plugin.v1`，`lifecycle=lazy`，`depth_level=production`（生产级 12 之一）
 - 能力声明：`system:admin`；可选依赖 `site` / `runtime-*` / `db-*`（未在 `depends_on` 中强制）
-- 方法：`deploy.templates` / `deploy.create`（同时接受裸 `templates` / `create`）
+- 方法：`app-deploy.templates` / `app-deploy.create`（域必须等于插件 id `app-deploy`，PLUGIN-PROTOCOL §7.2；不接受裸动词或旧 `deploy.` 前缀，v0.1.0 无存量用户不做兼容层）
 - 握手的 stdout 留给协议帧，日志一律写 stderr
 
 ## 骨架口径
 
-- `deploy.templates`：返回 `wordpress` / `laravel` / `nextjs` 三个白名单模板的元信息，不下载任何模板
-- `deploy.create`：先校验模板名在白名单内，再校验目标路径在配置根目录（`KORE_APP_DEPLOY_ROOT`，缺省 `/var/lib/kore/app-deploy`）之内，返回结构化占位 `applied=false`
+- `app-deploy.templates`：返回 `wordpress` / `laravel` / `nextjs` 三个白名单模板的元信息，不下载任何模板
+- `app-deploy.create`：先校验模板名在白名单内，再校验目标路径在配置根目录（`KORE_APP_DEPLOY_ROOT`，缺省 `/var/lib/kore/app-deploy`）之内，返回结构化占位 `applied=false`
 
 路径 / 模板非法返回 `E_INVALID`；未知方法返回 `E_NOTFOUND`。目标路径拒绝绝对路径、空路径、`.` / `..` 段、反斜杠与 NUL；只做字符串校验，**不执行任何文件写入**。
 
