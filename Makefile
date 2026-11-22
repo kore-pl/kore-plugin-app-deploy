@@ -10,7 +10,7 @@ DIST := dist
 VERSION := $(shell sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' info.json | head -n 1)
 PACKAGE := $(DIST)/$(ID)-$(VERSION).tar.gz
 
-.PHONY: build dist check clean
+.PHONY: build dist check e2e clean
 
 # 静态构建：G-16 兼容性基线（CGO_ENABLED=0 + GOWORK=off + GOAMD64=v1 + trimpath + -s -w）。
 build:
@@ -94,6 +94,10 @@ check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt 需要格式化："; echo "$$out"; exit 1; fi; echo "gofmt: clean"
 	GOWORK=off go vet ./...
 	GOWORK=off go test -timeout 200s ./...
+
+# 真实 docker E2E（默认跳过；显式开启后不允许因缺 docker 而降级跳过）。
+e2e:
+	GOWORK=off KORE_APP_E2E=1 go test -timeout 900s -v ./tests/e2e
 
 clean:
 	rm -rf bin dist

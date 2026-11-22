@@ -16,7 +16,7 @@ import (
 func testConfig() config {
 	return config{
 		id:           "app-deploy",
-		version:      "0.1.0",
+		version:      "0.2.0",
 		requiresKore: ">=0.1.0 <0.2.0",
 		capabilities: []string{"system:admin"},
 		root:         "/var/lib/kore/app-deploy",
@@ -78,7 +78,7 @@ func TestHandshake(t *testing.T) {
 	if params.PluginID != "app-deploy" || params.ID != "app-deploy" {
 		t.Fatalf("plugin_id/id=%q/%q，期望 app-deploy", params.PluginID, params.ID)
 	}
-	if params.Protocol != pluginapi.Protocol || params.Version != "0.1.0" {
+	if params.Protocol != pluginapi.Protocol || params.Version != "0.2.0" {
 		t.Fatalf("protocol/version=%q/%q 不符合 §5", params.Protocol, params.Version)
 	}
 	if params.PID != os.Getpid() {
@@ -100,7 +100,7 @@ func TestServeShutdown(t *testing.T) {
 	pluginConn, kernelConn := net.Pipe()
 	defer func() { _ = kernelConn.Close() }()
 	done := make(chan error, 1)
-	go func() { done <- serve(pluginConn, testConfig(), testLogger()); _ = pluginConn.Close() }()
+	go func() { done <- serve(pluginConn, testConfig(), testRuntime(t), testLogger()); _ = pluginConn.Close() }()
 
 	request := &pluginapi.Request{
 		Type: pluginapi.TypeRequest, ID: "id-1", ReqID: "r-1", Method: "kore.shutdown",
@@ -123,7 +123,7 @@ func TestServeTwoShutdowns(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		pluginConn, kernelConn := net.Pipe()
 		done := make(chan error, 1)
-		go func() { done <- serve(pluginConn, testConfig(), testLogger()); _ = pluginConn.Close() }()
+		go func() { done <- serve(pluginConn, testConfig(), testRuntime(t), testLogger()); _ = pluginConn.Close() }()
 		request := &pluginapi.Request{
 			Type: pluginapi.TypeRequest, ID: "id-2", ReqID: "r-2", Method: "kore.shutdown",
 		}

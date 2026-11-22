@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/pengtang1024/kore-plugin-app-deploy/internal/apop"
 	"github.com/pengtang1024/kore/pkg/pluginapi"
 )
 
@@ -27,6 +28,7 @@ type manifest struct {
 }
 
 // config 是插件运行期配置：环境变量 + 内嵌清单，不读任何配置文件。
+// 部署能力只持有 docker CLI 路径与状态目录，不持有任何 daemon 凭据。
 type config struct {
 	socket       string
 	id           string
@@ -35,17 +37,19 @@ type config struct {
 	requiresKore string
 	capabilities []string
 	root         string
+	stateDir     string
+	dockerBin    string
 	startedAt    time.Time
 }
 
-// loadConfig 读取协议环境变量并解析内嵌 info.json。
+// loadConfig 读取协议环境变量并解析内嵌清单。
 func loadConfig() (config, error) {
 	var m manifest
 	if err := json.Unmarshal(embeddedInfo, &m); err != nil {
-		return config{}, fmt.Errorf("解析内嵌 info.json: %w", err)
+		return config{}, fmt.Errorf("解析内嵌 manifest.json: %w", err)
 	}
 	if m.Protocol != pluginapi.Protocol {
-		return config{}, fmt.Errorf("info.json.protocol=%q 与 SDK 协议 %q 不一致", m.Protocol, pluginapi.Protocol)
+		return config{}, fmt.Errorf("manifest.json.protocol=%q 与 SDK 协议 %q 不一致", m.Protocol, pluginapi.Protocol)
 	}
 	cfg := config{
 		socket:       os.Getenv("KORE_PLUGIN_SOCK"),
@@ -54,14 +58,19 @@ func loadConfig() (config, error) {
 		version:      m.Version,
 		requiresKore: m.RequiresKore,
 		capabilities: m.Capabilities,
-		root:         os.Getenv("KORE_APP_DEPLOY_ROOT"),
+		root:         os.Getenv(apop.EnvRoot),
+		stateDir:     os.Getenv(apop.EnvStateDir),
+		dockerBin:    os.Getenv(apop.EnvDockerBin),
 		startedAt:    time.Now(),
 	}
 	if cfg.id == "" {
 		cfg.id = m.ID
 	}
 	if cfg.root == "" {
-		cfg.root = "/var/lib/kore/app-deploy"
+		cfg.root = apop.DefaultRoot
+	}
+	if cfg.dockerBin == "" {
+		cfg.dockerBin = apop.DefaultDockerBin
 	}
 	if cfg.socket == "" {
 		return config{}, fmt.Errorf("缺少环境变量 KORE_PLUGIN_SOCK")

@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
+
+	"github.com/pengtang1024/kore-plugin-app-deploy/internal/apop"
 )
 
 // main 按退出码区分失败：0 优雅退出、1 启动或协议失败。
@@ -38,5 +40,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logger.Info("hello 完成", "plugin_id", cfg.id, "version", cfg.version)
-	return serve(conn, cfg, logger)
+	runtime := apop.NewRuntime(apop.Options{
+		Root:      cfg.root,
+		StateDir:  cfg.stateDir,
+		DockerBin: cfg.dockerBin,
+	}, nil)
+	return serve(conn, cfg, runtime, logger)
 }
