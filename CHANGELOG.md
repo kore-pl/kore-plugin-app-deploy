@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-11-23)
+
+- test(fault): 补齐 G-20 故障注入——`upload` / `deployFromArtifact` / `upgrade` / `jobs` 四个新方法此前零 fault 覆盖。新增 `tests/fault/artifact_test.go`：数据根只读（upload 回 `E_INTERNAL`、不留应用目录、作业只记 failed）、状态路径被占用（回 `E_INTERNAL`、宿主状态文件原样）、部署记录损坏（回 `E_INTERNAL` 且拒绝自动重置、不得记为 succeeded）、升级暂存失败（旧版本目录与内容原样、无 `.staging-*` 残留）、作业记录损坏（回 `E_INTERNAL`、文件不被覆盖）；另加「无记录 = count 0」反面对照避免假通过
+- build: 版本 0.3.0 → 0.3.1（仅测试与版本，无运行时行为变更），`info.json` / `manifest.json` 同步
+
 ## 0.3.0 (2026-11-23)
 
 - feat: **用户自己的应用包**——`app-deploy.upload {name, format=zip|tar.gz, content_base64, sha256?}` 解压到 `$KORE_PLUGIN_DATA/apps/<name>`（复用 ResolveDataDirs）；逐条目护栏：绝对路径 / `..` 穿越 / 盘符 / 反斜杠 / 符号链接与硬链接 / 条目数与解压总量上限，解压先落暂存目录再整体 rename
