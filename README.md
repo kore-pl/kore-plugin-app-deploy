@@ -92,3 +92,22 @@ docker ps -a --filter name=kore-app- --format '{{.Names}}'   # 清理后应为�
 E2E 覆盖：`templates` 返回 4 个模板 → `deploy nginx-static` 后容器 running 且 `curl` 首页 200 → `list` 显示 running → `deploy wordpress` 双容器 running 且 `curl` 首页 200（WordPress 安装页）→ 端口冲突 `E_CONFLICT` → 非本插件容器 `E_UNAUTHORIZED` → `remove` 缺 confirm `E_INVALID` → `remove` 带 confirm 后容器/命名卷/网络/记录全部清理。
 
 `dist` 使用确定性参数归档（`--sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner` + `gzip -9n`，chmod 归一），重复构建 sha256 不变；`size_bytes` 由提交前实测包体积回填源清单。
+
+<!-- oss:begin -->
+## 开源与贡献
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+
+本仓库是 **kore** 的 `应用一键部署插件`（id `app-deploy`），独立仓库、独立版本线。内核与协议见 [kore](https://github.com/kore-pl/kore)。
+
+- **许可**：MIT（inbound = outbound，不要求 CLA）；提交用 `git commit -s` 签 DCO。
+- **贡献**：[CONTRIBUTING.md](CONTRIBUTING.md)（构建、门禁、发版、边界）。
+- **安全**：[SECURITY.md](SECURITY.md)——漏洞不要开公开 issue。
+- **行为准则**：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+- **兼容性**：`protocol: kore.plugin.v1` · `requires_kore: >=0.1.0 <0.2.0` · `lifecycle: lazy` · 深度等级 `production`。
+- **验证方式**：本地 `make check`（插件仓不配 CI；发布前 `make dist` 连跑两次核对 sha 一致）。
+- **发布产物**：`make dist` → `dist/app-deploy-0.2.0.tar.gz` + `.sha256`（位级可复现，连跑两次 sha 相同）。
+- **相关仓库**：[索引 kore-plugins](https://github.com/kore-pl/kore-plugins) · [协议文档](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-PROTOCOL.md) · [SDK 指南](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-SDK.md)
+
+<!-- oss:end -->
