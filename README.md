@@ -6,7 +6,9 @@
 
 - `kore.plugin.v1`，`lifecycle=lazy`，`depth_level=production`（生产级 12 之一）
 - 能力声明：`system:admin`（需要本机 docker CLI 与 daemon 访问权限）
-- 方法：`app-deploy.templates` / `app-deploy.deploy` / `app-deploy.list` / `app-deploy.remove`（域必须等于插件 id `app-deploy`，PLUGIN-PROTOCOL §7.2）
+- 方法（8 个业务方法，域必须等于插件 id `app-deploy`，PLUGIN-PROTOCOL §7.2）：
+  - 模板部署：`app-deploy.templates` / `app-deploy.deploy` / `app-deploy.list` / `app-deploy.remove`
+  - 用户应用包（0.3.0）：`app-deploy.upload` / `app-deploy.deployFromArtifact` / `app-deploy.upgrade` / `app-deploy.jobs`
 - 握手的 stdout 留给协议帧，日志一律写 stderr
 - **0.2.0 破坏性变更**：`app-deploy.create`（骨架占位）移除，由 `app-deploy.deploy` 取代；模板集合由 `wordpress/laravel/nextjs` 骨架改为 4 个可真实部署的模板（minor bump，无存量用户不做兼容层）
 
@@ -48,6 +50,17 @@
 
 容器命名：单容器模板用 `name` 本身，多容器模板的主容器用 `name`、依赖容器用 `<name>-<服务名>`（如 `kore-app-wp` / `kore-app-wp-db`）。依赖容器先启动，主容器最后启动。
 
+### 用户应用包方法（0.3.0）
+
+| 方法 | 入参 | 结果要点 |
+| --- | --- | --- |
+| `app-deploy.upload` | `{name, format: zip\|tar.gz, content_base64, sha256?}` | 解压到 `<root>/<name>`：`{name,path,files,bytes,sha256,job,outside_install}`；单包 ≤32 MiB，条目 / 解压总量 / 单文件上限 10000 / 256 MiB / 64 MiB，逐条目拒绝绝对路径、`..`、盘符、反斜杠与链接 |
+| `app-deploy.deployFromArtifact` | `{name, content_base64?, format?, sha256?, site_domain?, site_port?, databases:[{engine,name}]?}` | 登记 artifact 部署记录并回 `site_hint` 与建库提示；**不启容器、不写 nginx、不连 MySQL**（vhost 属 site、建库属 db-mysql，插件不互相调用） |
+| `app-deploy.upgrade` | `{name, format, content_base64, sha256?}` | 新包解到暂存 → 旧目录快照 `<state>/snapshots/<name>/<ts>` → 换入；换入失败自动回滚并在错误信息标注，结果带 `snapshot` 与 `job` |
+| `app-deploy.jobs` | `{id?}` | 作业状态 `{jobs:[{id,name,action,status,steps,error?,artifact_dir?,snapshot?,started_at,finished_at?}],count}`；只读、同步推进、不起 ticker（G-19） |
+
+artifact 部署记录使用模板标识 `artifact`（不走内置模板白名单：包内容由用户自己负责，容器仍只由模板 `deploy` 创建）。
+
 ## 安全设计
 
 1. **模板白名单**：镜像只出现在源码常量里，`deploy` 只接受模板 id；`image` / `cmd` 等额外字段被忽略，无法 `docker run evil/image`。
@@ -82,7 +95,7 @@
 ```bash
 gofmt -l . && go vet ./... && go test -timeout 200s ./...
 make build && make dist
-tar -tzf dist/app-deploy-0.2.0.tar.gz | head -1   # info.json
+tar -tzf dist/app-deploy-0.3.0.tar.gz | head -1   # info.json
 
 # 真 docker E2E（默认跳过；开启后缺 docker 会失败而不是跳过）
 make e2e
@@ -108,7 +121,7 @@ E2E 覆盖：`templates` 返回 4 个模板 → `deploy nginx-static` 后容器 
 - **行为准则**：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 - **兼容性**：`protocol: kore.plugin.v1` · `requires_kore: >=0.1.0 <0.2.0` · `lifecycle: lazy` · 深度等级 `production`。
 - **验证方式**：本地 `make check` 优先（CI 只在 push main / tag / PR / 手动跑；发布前 `make dist` 连跑两次核对 sha 一致）。
-- **发布产物**：`make dist` → `dist/app-deploy-0.2.0.tar.gz` + `.sha256`（位级可复现，连跑两次 sha 相同）。
+- **发布产物**：`make dist` → `dist/app-deploy-0.3.0.tar.gz` + `.sha256`（位级可复现，连跑两次 sha 相同）。
 - **相关仓库**：[索引 kore-plugins](https://github.com/kore-pl/kore-plugins) · [协议文档](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-PROTOCOL.md) · [SDK 指南](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-SDK.md)
 
 <!-- oss:end -->
