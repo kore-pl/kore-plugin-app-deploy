@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 (2026-11-23)
+
+- feat(zero-intrusion): 消费内核注入的 `KORE_PLUGIN_DATA`（ADR-0023 阶段 C）——部署根/状态默认 `$KORE_PLUGIN_DATA/{apps,snapshots}`；显式 `KORE_APP_DEPLOY_ROOT`/`KORE_APP_DEPLOY_STATE` 优先；两者都没有时回退旧默认 `/var/lib/kore/app-deploy` 并**打 WARN**（不静默）
+- feat(list): 每条部署返回 `outside_install` 与安装目录外 `hint`；**已部署应用不迁移**（仅标记，不自动搬迁）
+- test: 解析优先级/旧默认 WARN/既有记录保持/outside_install 判定/随包模板只读不落盘
+
 ## 0.2.1 (2026-11-23)
 
 - feat(protocol): `info.json` 补 `method_capabilities` 4 条——`templates`/`list` 声明 `system:read`，`deploy`/`remove` 声明 `system:admin`（§3.5 #12）

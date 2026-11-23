@@ -22,15 +22,16 @@ func (r *Runtime) callList(raw json.RawMessage) (json.RawMessage, *pluginapi.Err
 	if perr != nil {
 		return nil, perr
 	}
+	roots := r.dataRoots()
 	views := make([]DeploymentView, 0, len(st.Deployments))
 	for _, rec := range st.Deployments {
-		views = append(views, buildDeploymentView(rec, states))
+		views = append(views, buildDeploymentView(rec, states, roots))
 	}
 	return encode(ListResult{Deployments: views, Count: len(views)})
 }
 
 // buildDeploymentView 把一条记录与 docker 快照合成对外视图。
-func buildDeploymentView(rec Deployment, states []ContainerState) DeploymentView {
+func buildDeploymentView(rec Deployment, states []ContainerState, roots []string) DeploymentView {
 	refs := rec.Containers
 	if len(refs) == 0 {
 		// 兼容只有 container_id 的早期记录形状。
@@ -56,6 +57,7 @@ func buildDeploymentView(rec Deployment, states []ContainerState) DeploymentView
 	case !allRunning:
 		status = StatusExited
 	}
+	outside, hint := outsideInstall(rec, roots)
 	return DeploymentView{
 		ID:          rec.ID,
 		Template:    rec.Template,
@@ -64,9 +66,25 @@ func buildDeploymentView(rec Deployment, states []ContainerState) DeploymentView
 		Status:      status,
 		Ports:       rec.Ports,
 		AccessURL:   firstAccessURL(rec.Ports),
-		CreatedAt:   rec.CreatedAt,
-		Containers:  containers,
+		CreatedAt:      rec.CreatedAt,
+		Containers:     containers,
+		OutsideInstall: outside,
+		Hint:           hint,
 	}
+}
+
+// outsideInstall 判定一条部署记录是否落在安装目录之外，并给出不自动搬迁的提示。
+// 只依据 bind 挂载的真实宿主机路径；named 卷由 docker 管理、无路径可判，记 false。
+func outsideInstall(rec Deployment, roots []string) (bool, string) {
+	for _, volume := range rec.Volumes {
+		if volume.Kind != VolumeBind || volume.Name == "" {
+			continue
+		}
+		if OutsideAllRoots(volume.Name, roots) {
+			return true, "该应用部署在安装目录外（" + volume.Name + "）：插件不会自动搬迁，如需归位请先 remove 再重新 deploy"
+		}
+	}
+	return false, ""
 }
 
 // containerStatus 在 docker 快照里定位一个记录中的容器：

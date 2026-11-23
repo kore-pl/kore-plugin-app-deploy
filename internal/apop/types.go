@@ -281,6 +281,11 @@ type DeploymentView struct {
 	AccessURL   string          `json:"access_url"`
 	CreatedAt   string          `json:"created_at"`
 	Containers  []ContainerView `json:"containers"`
+	// OutsideInstall 为 true 表示该应用的 bind 挂载落在安装目录之外
+	// （ADR-0023 阶段 C 之前部署的历史应用）；插件不自动搬迁。
+	OutsideInstall bool `json:"outside_install"`
+	// Hint 是 outside_install=true 时的可操作提示；正常应用为空串省略。
+	Hint string `json:"hint,omitempty"`
 }
 
 // ListResult 是 app-deploy.list 的结构化结果。

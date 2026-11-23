@@ -40,6 +40,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logger.Info("hello 完成", "plugin_id", cfg.id, "version", cfg.version)
+	if cfg.dataWarn != "" {
+		logger.Warn("数据目录回退旧默认", "detail", cfg.dataWarn)
+	}
 	runtime := apop.NewRuntime(apop.Options{
 		Root:      cfg.root,
 		StateDir:  cfg.stateDir,

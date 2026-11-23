@@ -38,6 +38,7 @@ type config struct {
 	capabilities []string
 	root         string
 	stateDir     string
+	dataWarn     string
 	dockerBin    string
 	startedAt    time.Time
 }
@@ -58,17 +59,13 @@ func loadConfig() (config, error) {
 		version:      m.Version,
 		requiresKore: m.RequiresKore,
 		capabilities: m.Capabilities,
-		root:         os.Getenv(apop.EnvRoot),
-		stateDir:     os.Getenv(apop.EnvStateDir),
 		dockerBin:    os.Getenv(apop.EnvDockerBin),
 		startedAt:    time.Now(),
 	}
 	if cfg.id == "" {
 		cfg.id = m.ID
 	}
-	if cfg.root == "" {
-		cfg.root = apop.DefaultRoot
-	}
+	cfg.root, cfg.stateDir, cfg.dataWarn = apop.ResolveDataDirs(os.Getenv)
 	if cfg.dockerBin == "" {
 		cfg.dockerBin = apop.DefaultDockerBin
 	}
