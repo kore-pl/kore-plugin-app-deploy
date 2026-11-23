@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2026-11-23)
+
+- feat(protocol): `info.json` 补 `method_capabilities` 4 条——`templates`/`list` 声明 `system:read`，`deploy`/`remove` 声明 `system:admin`（§3.5 #12）
+- test: 声明一致性表驱动门禁（分类断言 + 声明 ⊆ 实现反向断言 + 条数相等）
+
 ## 0.2.0 (2026-11-23)
 
 - feat: 内置模板**真部署**——`app-deploy.deploy` 通过本机 docker CLI（固定 argv、不经 shell）拉起容器，内置 `nginx-static` / `wordpress` / `redis` / `postgres` 四个模板
