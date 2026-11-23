@@ -1,7 +1,7 @@
 {
   "id": "app-deploy",
   "name": "应用一键部署插件",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "protocol": "kore.plugin.v1",
   "lifecycle": "lazy",
   "depth_level": "production",
@@ -11,7 +11,11 @@
     "app-deploy.templates": "system:read",
     "app-deploy.deploy": "system:admin",
     "app-deploy.list": "system:read",
-    "app-deploy.remove": "system:admin"
+    "app-deploy.remove": "system:admin",
+    "app-deploy.upload": "system:admin",
+    "app-deploy.deployFromArtifact": "system:admin",
+    "app-deploy.upgrade": "system:admin",
+    "app-deploy.jobs": "system:read"
   },
   "triggers": [],
   "requires_kore": ">=0.1.0 <0.2.0",
@@ -19,5 +23,5 @@
   "depends_on": [],
   "conflicts": [],
   "scenario_tags": ["app", "web"],
-  "size_bytes": 1541030
+  "size_bytes": 1687726
 }

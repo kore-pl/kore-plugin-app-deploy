@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 (2026-11-23)
+
+- feat: **用户自己的应用包**——`app-deploy.upload {name, format=zip|tar.gz, content_base64, sha256?}` 解压到 `$KORE_PLUGIN_DATA/apps/<name>`（复用 ResolveDataDirs）；逐条目护栏：绝对路径 / `..` 穿越 / 盘符 / 反斜杠 / 符号链接与硬链接 / 条目数与解压总量上限，解压先落暂存目录再整体 rename
+- feat: `app-deploy.deployFromArtifact` —— 登记 artifact 部署记录（bind 指向包目录）并返回 `site_hint`（域名/端口/根目录）与 `databases` 声明提示；**不写 nginx、不连 MySQL**（vhost 属 site、建库属 db-mysql 写域，G-13 禁止插件互调）
+- feat: `app-deploy.upgrade {name, format, content_base64}` —— 新包解到同根暂存 → 旧目录快照到 `$KORE_PLUGIN_DATA/snapshots/<name>/<ts>` → 目录换入；换入失败**回滚到旧目录**
+- feat: `app-deploy.jobs {id?}` —— 分阶段作业状态（pending/running/succeeded/failed + steps），同步推进并落盘 `artifact-jobs.json`，供 UI 轮询；**不起 ticker**（G-19）
+- feat(capability): `method_capabilities` 8 条——`templates`/`list`/`jobs` → `system:read`，`deploy`/`upload`/`deployFromArtifact`/`upgrade`/`remove` → `system:admin`
+- test: 路径穿越（zip/tar/绝对路径/盘符）逐条拒绝、坏包与缺包、上传→部署登记+边界 hint、升级快照与注入失败回滚、作业状态机成功/失败
+
 ## 0.2.2 (2026-11-23)
 
 - feat(zero-intrusion): 消费内核注入的 `KORE_PLUGIN_DATA`（ADR-0023 阶段 C）——部署根/状态默认 `$KORE_PLUGIN_DATA/{apps,snapshots}`；显式 `KORE_APP_DEPLOY_ROOT`/`KORE_APP_DEPLOY_STATE` 优先；两者都没有时回退旧默认 `/var/lib/kore/app-deploy` 并**打 WARN**（不静默）
