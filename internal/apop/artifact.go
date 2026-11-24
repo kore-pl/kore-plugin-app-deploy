@@ -215,7 +215,17 @@ func (r *Runtime) saveJobs(jobs []ArtifactJob) *pluginapi.Error {
 }
 
 // upsertJob 插入或替换一条作业记录并落盘。
+//
+// 读-改-写必须持状态锁：否则并发写者各自拿旧快照覆盖，作业记录会丢
+// （实测 8 并发 upload 只剩 3 条）。
 func (r *Runtime) upsertJob(job ArtifactJob) *pluginapi.Error {
+	unlock, perr := lockState(r.opts.StateDir)
+	if perr != nil {
+		// 状态目录不可用时锁也打不开：错误信息必须明确指向「作业记录」这个
+		// 失败面（E_INTERNAL 契约要求 message 能定位子系统，不能笼统报错）。
+		return internalErr("作业记录不可用（" + perr.Message + "）")
+	}
+	defer unlock()
 	jobs, perr := r.loadJobs()
 	if perr != nil {
 		return perr
@@ -562,25 +572,32 @@ func (r *Runtime) callDeployFromArtifact(raw json.RawMessage) (json.RawMessage, 
 	}
 	job.ArtifactDir = dir
 	r.step(&job, "extract", JobSucceeded)
-	if err := ensureStateDir(r.opts.StateDir); err != nil {
-		return nil, internalErr("创建状态目录失败: " + err.Error())
-	}
-	st, perr := loadState(r.opts.StateDir)
-	if perr != nil {
-		return nil, perr
-	}
 	now := nowStamp()
 	record := Deployment{
 		ID: newJobID(), Template: ArtifactTemplate, Name: p.Name,
 		Volumes:   []VolumeRef{{Name: dir, Kind: VolumeBind}},
 		CreatedAt: now, Status: StatusExited,
 	}
-	upsertDeployment(&st, record)
 	r.step(&job, "register", JobRunning)
-	if perr := saveState(r.opts.StateDir, st); perr != nil {
-		job.Error = perr.Message
+	// 登记是「读-改-写」：持状态锁重读最新快照再 upsert，避免覆盖并发写者的新增。
+	// step 会写作业文件（同一把锁），所以必须在临界区外调用，不能嵌套加锁。
+	saveErr := func() *pluginapi.Error {
+		unlock, perr := lockState(r.opts.StateDir)
+		if perr != nil {
+			return perr
+		}
+		defer unlock()
+		st, perr := loadState(r.opts.StateDir)
+		if perr != nil {
+			return perr
+		}
+		upsertDeployment(&st, record)
+		return saveState(r.opts.StateDir, st)
+	}()
+	if saveErr != nil {
+		job.Error = saveErr.Message
 		r.step(&job, "register", JobFailed)
-		return nil, perr
+		return nil, saveErr
 	}
 	job.Status = JobSucceeded
 	job.FinishedAt = nowStamp()

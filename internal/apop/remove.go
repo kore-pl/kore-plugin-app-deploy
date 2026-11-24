@@ -23,6 +23,16 @@ func (r *Runtime) callRemove(raw json.RawMessage) (json.RawMessage, *pluginapi.E
 	if !p.Confirm {
 		return nil, invalid("remove 需要二次确认：请传 confirm:true 后重试")
 	}
+	// 删除是「读记录 → 删容器 / 卷 / 网络 → 删记录 → 写回」：全程持状态锁，
+	// 否则与并发 deploy / upgrade 的写回互相覆盖（删掉别人刚落的记录）。
+	if err := ensureStateDir(r.opts.StateDir); err != nil {
+		return nil, internalErr("创建状态目录失败: " + err.Error())
+	}
+	unlock, perr := lockState(r.opts.StateDir)
+	if perr != nil {
+		return nil, perr
+	}
+	defer unlock()
 	st, perr := loadState(r.opts.StateDir)
 	if perr != nil {
 		return nil, perr

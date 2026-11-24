@@ -101,9 +101,28 @@ func (r *Runtime) callDeploy(raw json.RawMessage) (json.RawMessage, *pluginapi.E
 		CreatedAt:   createdAt,
 		Status:      StatusRunning,
 	}
-	upsertDeployment(&st, record)
-	if perr := saveState(r.opts.StateDir, st); perr != nil {
-		return nil, r.failWithRollback(perr, created, network)
+	// 落记录是「读-改-写」：必须持状态锁重读最新快照再插入。上面第 46 行的
+	// loadState 只用于快速失败，它的快照可能已被并发写者推进——直接拿旧快照
+	// upsert 会把别人的新增整段覆盖（8 并发只剩 1 条）。
+	// 锁只覆盖读-改-写，不覆盖前面的 docker run（否则并发部署被完全串行化）。
+	saveErr := func() *pluginapi.Error {
+		unlock, perr := lockState(r.opts.StateDir)
+		if perr != nil {
+			return perr
+		}
+		defer unlock()
+		fresh, perr := loadState(r.opts.StateDir)
+		if perr != nil {
+			return perr
+		}
+		if findDeployment(fresh, p.Name) >= 0 {
+			return conflict("同名部署已存在: " + p.Name + "（并发同名请求已先落记录，本次已回滚）")
+		}
+		upsertDeployment(&fresh, record)
+		return saveState(r.opts.StateDir, fresh)
+	}()
+	if saveErr != nil {
+		return nil, r.failWithRollback(saveErr, created, network)
 	}
 	return encode(DeployResult{
 		Deployed:    true,

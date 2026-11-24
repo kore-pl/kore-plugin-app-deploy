@@ -17,12 +17,15 @@ import (
 )
 
 // 本文件是「并发」边界：用真 goroutine 同时打进方法面，在 -race 下跑，
-// 断言三件事——① 每个请求自身结果正确、互不串扰；② 并发读状态文件永远读到
-// 完整 JSON（原子替换，没有半截文件）；③ 执行面副作用次数与请求数一致。
+// 断言四件事——① 每个请求自身结果正确、互不串扰；② 并发读状态文件永远读到
+// 完整 JSON（原子替换，没有半截文件）；③ 执行面副作用次数与请求数一致；
+// ④ 状态文件「读-改-写」不丢更新：N 个并发写者必须落 N 条记录，且逐条与
+// 请求严格对应。
 //
-// 已知缺陷（不在本用例断言，避免把缺陷固化成"预期"）：deployments.json /
-// artifact-jobs.json 是「读-改-写」且进程内无锁，并发写会 last-writer-wins
-// 丢记录。本套件只断言代码当前真实提供的保证，该缺陷已在交付报告中标出。
+// ④ 是缺陷回归断言（a272f5b 的覆盖面缺口）：修复前 deployments.json /
+// artifact-jobs.json 的 load→改→save 无互斥，8 个不同应用并发 deploy 全部成功
+// 但最终只剩 1 条记录（last-writer-wins）。这四条断言在修复前必须 FAIL，
+// 修复后必须 PASS——不许为了过绿把断言放宽成「记录数 ≤ N」。
 
 // startBarrier 返回一个闭锁通道：所有 goroutine 在同一瞬间起跑，
 // 保证「并发」不是串行执行后的事后断言。
@@ -150,28 +153,93 @@ func TestConcurrentDeployDistinctApps(t *testing.T) {
 		t.Fatalf("容器数=%d，期望 %d: %v", len(seenName), n, seenName)
 	}
 
-	// 最终部署记录：必须是合法 JSON、名字来自请求集合、无重复。
-	got := deploymentNames(t, state)
-	if len(got) == 0 {
-		t.Fatal("并发部署后部署记录为空")
+	// 最终部署记录：必须恰好 N 条（每个并发写者一条，读-改-写不得丢更新）。
+	records := deploymentRecords(t, state)
+	if len(records) != n {
+		t.Fatalf("并发部署后部署记录 %d 条，期望 %d 条：%v（读-改-写丢更新）",
+			len(records), n, deploymentNames(t, state))
 	}
-	want := make(map[string]bool, n)
-	for _, name := range names {
-		want[name] = true
-	}
-	seen := map[string]bool{}
-	for _, name := range got {
-		if !want[name] {
-			t.Fatalf("部署记录出现未请求的名字: %q", name)
+	// 逐条严格对应：名字 → 部署 id / 容器 id / 宿主端口 / 容器引用必须来自
+	// 各自那次调用，不能出现「A 的记录写了 B 的容器」这类串扰。
+	for i, res := range results {
+		rec, ok := records[names[i]]
+		if !ok {
+			t.Fatalf("部署记录缺少应用 %q（共 %d 条）", names[i], len(records))
 		}
-		if seen[name] {
-			t.Fatalf("部署记录名字重复: %q", name)
+		if rec.ID != res.ID {
+			t.Fatalf("%s 记录部署 id=%q，期望 %q（串扰）", names[i], rec.ID, res.ID)
 		}
-		seen[name] = true
+		if rec.Template != "nginx-static" {
+			t.Fatalf("%s 记录模板=%q，期望 nginx-static", names[i], rec.Template)
+		}
+		if rec.ContainerID != res.ContainerID {
+			t.Fatalf("%s 记录主容器 id=%q，期望 %q（串扰）", names[i], rec.ContainerID, res.ContainerID)
+		}
+		if len(rec.Containers) != 1 || rec.Containers[0].ID != res.ContainerID {
+			t.Fatalf("%s 记录容器引用=%+v，期望单个容器 %q", names[i], rec.Containers, res.ContainerID)
+		}
+		wantPort := 19100 + i
+		if len(rec.Ports) != 1 || rec.Ports[0].HostPort != wantPort {
+			t.Fatalf("%s 记录宿主端口=%+v，期望 %d（串扰）", names[i], rec.Ports, wantPort)
+		}
+		if rec.CreatedAt != res.CreatedAt {
+			t.Fatalf("%s 记录创建时间=%q，期望 %q", names[i], rec.CreatedAt, res.CreatedAt)
+		}
 	}
-	if len(got) > n {
-		t.Fatalf("部署记录数 %d 超过请求数 %d", len(got), n)
+	// artifact-jobs.json 与 deployments.json 同处状态目录、共享同一把状态锁：
+	// deploy 不写作业记录，所以这里断言该文件要么不存在、要么是 0 条的完整 JSON
+	// ——即并发 deploy 不得把相邻状态文件写成半截或凭空塞记录。
+	assertJobsFileConsistent(t, state, 0)
+}
+
+// deploymentRecords 读取 deployments.json，返回 name → 记录。
+// 解析失败即判失败（并发原子替换保证读到的一定是完整文件）。
+func deploymentRecords(t *testing.T, stateDir string) map[string]apop.Deployment {
+	t.Helper()
+	path := filepath.Join(stateDir, apop.DeploymentsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		t.Fatalf("读取部署记录失败: %v", err)
 	}
+	var doc struct {
+		Version     int               `json:"version"`
+		Deployments []apop.Deployment `json:"deployments"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("部署记录不是完整 JSON（读到半截文件？）: %v（%s）", err, data)
+	}
+	out := make(map[string]apop.Deployment, len(doc.Deployments))
+	for _, rec := range doc.Deployments {
+		if _, dup := out[rec.Name]; dup {
+			t.Fatalf("部署记录名字重复: %q", rec.Name)
+		}
+		out[rec.Name] = rec
+	}
+	return out
+}
+
+// assertJobsFileConsistent 断言 artifact-jobs.json 是完整 JSON 且恰好 want 条：
+// 文件不存在等价于 0 条。
+func assertJobsFileConsistent(t *testing.T, stateDir string, want int) []apop.ArtifactJob {
+	t.Helper()
+	data := readFile(t, filepath.Join(stateDir, "artifact-jobs.json"))
+	if data == nil {
+		if want != 0 {
+			t.Fatalf("artifact-jobs.json 不存在，期望 %d 条作业记录", want)
+		}
+		return nil
+	}
+	var jobs []apop.ArtifactJob
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		t.Fatalf("artifact-jobs.json 不是完整 JSON（读到半截文件？）: %v（%s）", err, data)
+	}
+	if len(jobs) != want {
+		t.Fatalf("artifact-jobs.json 作业记录 %d 条，期望 %d 条（读-改-写丢更新）", len(jobs), want)
+	}
+	return jobs
 }
 
 // TestConcurrentUploadsKeepPayloadsIsolated 并发上传 8 个不同应用包（内容互不相同）：
@@ -236,11 +304,22 @@ func TestConcurrentUploadsKeepPayloadsIsolated(t *testing.T) {
 		}
 	}
 
-	// 作业记录文件必须是完整 JSON（并发写可能丢记录——已知缺陷，不在此断言完整性）。
-	if data := readFile(t, filepath.Join(state, "artifact-jobs.json")); data != nil {
-		var jobs []apop.ArtifactJob
-		if err := json.Unmarshal(data, &jobs); err != nil {
-			t.Fatalf("并发上传后作业记录不是完整 JSON: %v（%s）", err, data)
+	// 作业记录：8 个并发 upload 各写一条，必须恰好 8 条、名字与请求严格对应，
+	// 且没有任何一条被后来的写者按旧快照覆盖掉。
+	jobs := assertJobsFileConsistent(t, state, n)
+	jobNames := make(map[string]bool, n)
+	for _, job := range jobs {
+		if job.Action != "upload" || job.Status != apop.JobSucceeded {
+			t.Fatalf("作业记录状态异常: %+v", job)
+		}
+		if jobNames[job.Name] {
+			t.Fatalf("作业记录应用名重复: %q（串扰）", job.Name)
+		}
+		jobNames[job.Name] = true
+	}
+	for _, name := range names {
+		if !jobNames[name] {
+			t.Fatalf("作业记录缺少应用 %q（共 %d 条）", name, len(jobs))
 		}
 	}
 	assertNoStagingResidue(t, root)

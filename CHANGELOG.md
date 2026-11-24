@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 (2026-11-24)
+
+- fix(state): `deployments.json` / `artifact-jobs.json` 的「读-改-写」加跨进程状态锁，修复并发丢更新。缺陷实测：8 个不同应用并发 `deploy` 全部成功但 `deployments.json` 只剩 **1 条**；8 个并发 `upload` 后 `artifact-jobs.json` 只剩 **3 条**（last-writer-wins，旧快照覆盖别人的新增）。`deploy` / `remove` / `deployFromArtifact` / `upsertJob` 的 load→改→save 全部进临界区；`deploy` 的锁只覆盖落记录窗口，不包住 `docker run`（并发部署不被串行化），同名并发请求在锁内重读后回 `E_CONFLICT` 并回滚容器
+- fix(lock): 锁固定在**旁路**文件 `<state>/.state.lock` 上，不加在会被 rename 替换的状态文件上（rename 后 inode 更替，锁会静默失效——site 清单锁的教训）。一把锁同时管两个状态文件：二者会被同一次调用先后写入，分锁会引入加锁顺序问题；unix 走 `flock`（EINTR/EWOULDBLOCK 重试、5s 上限、进程消亡由内核释放），非 unix 退化为进程内 `sync.Mutex` 并创建同名锁文件
+- test(boundary): 补缺陷回归断言——`TestConcurrentDeployDistinctApps` 断言 8 并发后 `deployments.json` **恰好 8 条**、逐条与对应应用的部署 id / 容器 id / 宿主端口 / 创建时间严格对应（无串扰）、`artifact-jobs.json` 完整且未被 deploy 凭空写入；`TestConcurrentUploadsKeepPayloadsIsolated` 断言 8 并发 upload 后作业记录**恰好 8 条**且应用名无重复。修复前两条断言稳定 FAIL（1/8、3/8），修复后 `-race` 全绿
+- build: 版本 0.3.1 → 0.3.2，`info.json` / `manifest.json` / README 发布产物版本同步
+
 ## 0.3.1 (2026-11-23)
 
 - test(fault): 补齐 G-20 故障注入——`upload` / `deployFromArtifact` / `upgrade` / `jobs` 四个新方法此前零 fault 覆盖。新增 `tests/fault/artifact_test.go`：数据根只读（upload 回 `E_INTERNAL`、不留应用目录、作业只记 failed）、状态路径被占用（回 `E_INTERNAL`、宿主状态文件原样）、部署记录损坏（回 `E_INTERNAL` 且拒绝自动重置、不得记为 succeeded）、升级暂存失败（旧版本目录与内容原样、无 `.staging-*` 残留）、作业记录损坏（回 `E_INTERNAL`、文件不被覆盖）；另加「无记录 = count 0」反面对照避免假通过
