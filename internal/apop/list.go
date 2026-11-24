@@ -59,13 +59,13 @@ func buildDeploymentView(rec Deployment, states []ContainerState, roots []string
 	}
 	outside, hint := outsideInstall(rec, roots)
 	return DeploymentView{
-		ID:          rec.ID,
-		Template:    rec.Template,
-		Name:        rec.Name,
-		ContainerID: rec.ContainerID,
-		Status:      status,
-		Ports:       rec.Ports,
-		AccessURL:   firstAccessURL(rec.Ports),
+		ID:             rec.ID,
+		Template:       rec.Template,
+		Name:           rec.Name,
+		ContainerID:    rec.ContainerID,
+		Status:         status,
+		Ports:          rec.Ports,
+		AccessURL:      firstAccessURL(rec.Ports),
 		CreatedAt:      rec.CreatedAt,
 		Containers:     containers,
 		OutsideInstall: outside,

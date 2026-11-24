@@ -142,13 +142,13 @@ type JobsResult struct {
 
 // artifactParams 是 upload 的入参。
 type artifactParams struct {
-	Name           string `json:"name"`
-	Format         string `json:"format"`
-	ContentBase64  string `json:"content_base64"`
-	Sha256         string `json:"sha256,omitempty"`
-	Databases      []DatabaseDecl `json:"databases,omitempty"`
-	SiteDomain     string `json:"site_domain,omitempty"`
-	SitePort       int    `json:"site_port,omitempty"`
+	Name          string         `json:"name"`
+	Format        string         `json:"format"`
+	ContentBase64 string         `json:"content_base64"`
+	Sha256        string         `json:"sha256,omitempty"`
+	Databases     []DatabaseDecl `json:"databases,omitempty"`
+	SiteDomain    string         `json:"site_domain,omitempty"`
+	SitePort      int            `json:"site_port,omitempty"`
 }
 
 // jobsParams 是 jobs 的入参。
