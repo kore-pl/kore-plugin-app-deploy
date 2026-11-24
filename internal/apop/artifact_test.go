@@ -289,3 +289,64 @@ func TestJobsProgressStateMachine(t *testing.T) {
 		t.Fatalf("失败作业必须记录 failed + error: %+v", allJobs)
 	}
 }
+
+// TestUpgradeSameSecondSnapshotsIsolated 是同秒升级快照互相覆盖竞态的缺陷回归（P2）。
+//
+// 缺陷本体：快照目录名只有秒级时间戳，同一应用同一秒两次 upgrade 撞同一路径；
+// 旧代码用 os.MkdirAll 建快照，对已存在目录返回 nil（不报错），于是第二次
+// copyTree 把内容写进第一次的快照、互相覆盖。
+//
+// 本用例固定 snapshotStampFn，把「同秒」从概率事件变成确定性条件：
+// 两次 upgrade 串行执行但共享同一时间前缀。断言三次——① 两个快照路径不同；
+// ② 第一次快照的 v1 不被第二次的 v2 覆盖；③ 第二次快照保留升级前的 v2。
+// 修复前 ① 必然 FAIL（同路径），修复后三条全 PASS。
+func TestUpgradeSameSecondSnapshotsIsolated(t *testing.T) {
+	runtime := newArtifactRuntime(t)
+	origStamp := snapshotStampFn
+	snapshotStampFn = func() string { return "20261124T120000Z" }
+	defer func() { snapshotStampFn = origStamp }()
+
+	if _, perr := runtime.callUpload(uploadParams("app", ArtifactFormatZip, buildZip(t, map[string]string{"v.txt": "v1"}))); perr != nil {
+		t.Fatalf("upload v1 失败: %+v", perr)
+	}
+	firstRaw, perr := runtime.callUpgrade(uploadParams("app", ArtifactFormatZip, buildZip(t, map[string]string{"v.txt": "v2"})))
+	if perr != nil {
+		t.Fatalf("第一次 upgrade 失败: %+v", perr)
+	}
+	var first UpgradeResult
+	if err := json.Unmarshal(firstRaw, &first); err != nil {
+		t.Fatal(err)
+	}
+	secondRaw, perr := runtime.callUpgrade(uploadParams("app", ArtifactFormatZip, buildZip(t, map[string]string{"v.txt": "v3"})))
+	if perr != nil {
+		t.Fatalf("第二次 upgrade 失败: %+v", perr)
+	}
+	var second UpgradeResult
+	if err := json.Unmarshal(secondRaw, &second); err != nil {
+		t.Fatal(err)
+	}
+
+	// ① 同秒两次 upgrade 必须落到不同快照目录。
+	if first.Snapshot == "" || second.Snapshot == "" {
+		t.Fatalf("快照路径为空: first=%q second=%q", first.Snapshot, second.Snapshot)
+	}
+	if first.Snapshot == second.Snapshot {
+		t.Fatalf("同秒两次 upgrade 撞同一快照路径 %q：第二次 copyTree 覆盖了第一次", first.Snapshot)
+	}
+	// ② 第一次快照内容必须是升级前的 v1，不得被第二次的 v2 覆盖。
+	if got, err := os.ReadFile(filepath.Join(first.Snapshot, "v.txt")); err != nil || string(got) != "v1" {
+		t.Fatalf("第一次快照应为 v1（未被覆盖），实际 %q err=%v（路径 %s）", got, err, first.Snapshot)
+	}
+	// ③ 第二次快照保留它升级前的 v2。
+	if got, err := os.ReadFile(filepath.Join(second.Snapshot, "v.txt")); err != nil || string(got) != "v2" {
+		t.Fatalf("第二次快照应为 v2，实际 %q err=%v（路径 %s）", got, err, second.Snapshot)
+	}
+	// ④ 快照根目录下恰好两个独立子目录（不是靠改返回值骗过断言）。
+	entries, err := os.ReadDir(filepath.Join(runtime.opts.StateDir, snapshotsSubdir, "app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("快照目录应恰好 2 个，实际 %d: %v", len(entries), entries)
+	}
+}

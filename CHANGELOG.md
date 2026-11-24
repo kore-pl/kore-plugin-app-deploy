@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 (2026-11-24)
+
+- fix(upgrade): 修复升级快照目录**同秒并发互相覆盖**的 P2 竞态。根因：快照目录名只有秒级时间戳 `<state>/snapshots/<name>/<UTC秒>`，同一应用同一秒两次 upgrade 撞同一路径，`os.MkdirAll` 对已存在目录返回 nil（不报错），两次 `copyTree` 互相覆盖、后写覆盖先写。首次调用 `snapshotStampFn()` 生成 `<UTC秒>` 前缀后撞名追加 `-2/-3…` 后缀（上限 64 次，超出结构化报错），用 `os.Mkdir` 原子占名——已存在则原子返回 EEXIST 而非静默成功。状态锁边界不变：仍只护 deployments/jobs JSON，快照目录占名的原子性由文件系统保证，重 IO 的 copyTree 留在锁外，不把毫秒级 JSON 临界区拖成秒级、避免撞 5s 锁超时
+- test(boundary): 新增 `TestUpgradeSameSecondSnapshotsIsolated` 缺陷回归——注入固定 `snapshotStampFn` 把「同秒」从概率事件变确定性，两次串行 upgrade 断言快照路径两两不同、第一次快照 v1 不被第二次 v2 覆盖、第二次快照保留 v2、快照根恰好 2 个独立子目录。修复前稳定 FAIL（撞同一路径），修复后 PASS；全仓 `go test -race ./...` 五包全绿、`make check` exit 0
+- build: 版本 0.3.2 → 0.3.3（运行时行为变更，dist sha 变化必须 bump），`info.json` / `manifest.json` / README 发布产物版本同步
+
 ## 0.3.2 (2026-11-24)
 
 - fix(state): `deployments.json` / `artifact-jobs.json` 的「读-改-写」加跨进程状态锁，修复并发丢更新。缺陷实测：8 个不同应用并发 `deploy` 全部成功但 `deployments.json` 只剩 **1 条**；8 个并发 `upload` 后 `artifact-jobs.json` 只剩 **3 条**（last-writer-wins，旧快照覆盖别人的新增）。`deploy` / `remove` / `deployFromArtifact` / `upsertJob` 的 load→改→save 全部进临界区；`deploy` 的锁只覆盖落记录窗口，不包住 `docker run`（并发部署不被串行化），同名并发请求在锁内重读后回 `E_CONFLICT` 并回滚容器

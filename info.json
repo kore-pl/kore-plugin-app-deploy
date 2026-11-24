@@ -1,7 +1,7 @@
 {
   "id": "app-deploy",
   "name": "应用一键部署插件",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "protocol": "kore.plugin.v1",
   "lifecycle": "lazy",
   "depth_level": "production",
@@ -23,5 +23,5 @@
   "depends_on": [],
   "conflicts": [],
   "scenario_tags": ["app", "web"],
-  "size_bytes": 1690217
+  "size_bytes": 1691012
 }

@@ -159,6 +159,13 @@ type jobsParams struct {
 // renameFn 是目录换入的注入点（测试可替换以验证失败回滚）。
 var renameFn = os.Rename
 
+// snapshotStampFn 返回快照目录名的时间前缀（UTC 秒 "20060102T150405Z"）。
+// 抽成注入点是为了让边界用例固定时间、把「同秒撞名」从概率事件变成确定性复现；
+// 生产路径恒为 time.Now().UTC()。
+var snapshotStampFn = func() string {
+	return time.Now().UTC().Format("20060102T150405Z")
+}
+
 // nowStamp 返回 RFC3339 时间串。
 func nowStamp() string { return time.Now().UTC().Format(time.RFC3339) }
 
@@ -679,14 +686,36 @@ func (r *Runtime) callUpgrade(raw json.RawMessage) (json.RawMessage, *pluginapi.
 		r.step(&job, "extract", JobFailed)
 		return nil, invalid("包内没有可部署文件")
 	}
-	// 2) 旧目录快照（<state>/snapshots/<name>/<ts>）
+	// 2) 旧目录快照（<state>/snapshots/<name>/<ts>[-N]）
+	// 快照目录名不能只用秒级时间戳：同一应用同一秒两次 upgrade 会撞同一路径，
+	// MkdirAll 对已存在目录返回 nil（不报错），两次 copyTree 会互相覆盖。
+	// 改用 os.Mkdir 原子占名——已存在则原子返回 EEXIST，冲突追加 -2/-3… 后缀；
+	// 上限 64 次仍撞则结构化报错（拒绝无限重试），且不触碰已有快照。
+	// 这里不扩状态锁的临界区：目录占名的原子性由文件系统保证，copyTree 的重 IO
+	// 留在锁外，避免把毫秒级 JSON 临界区拖成秒级、撞上 5s 锁超时。
 	snapshotRoot := filepath.Join(r.opts.StateDir, snapshotsSubdir, p.Name)
 	if err := os.MkdirAll(snapshotRoot, 0o700); err != nil {
 		return nil, internalErr("创建快照目录失败: " + err.Error())
 	}
-	snapshot := filepath.Join(snapshotRoot, time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.MkdirAll(snapshot, 0o700); err != nil {
-		return nil, internalErr("创建快照失败: " + err.Error())
+	stamp := snapshotStampFn()
+	snapshot := ""
+	for attempt := 0; attempt < 64; attempt++ {
+		name := stamp
+		if attempt > 0 {
+			name = stamp + "-" + strconv.Itoa(attempt+1)
+		}
+		candidate := filepath.Join(snapshotRoot, name)
+		err := os.Mkdir(candidate, 0o700)
+		if err == nil {
+			snapshot = candidate
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, internalErr("创建快照失败: " + err.Error())
+		}
+	}
+	if snapshot == "" {
+		return nil, internalErr("创建快照失败：同一秒内并发升级过多（>64），请稍后重试")
 	}
 	if perr := copyTree(target, snapshot); perr != nil {
 		job.Error = perr.Message
