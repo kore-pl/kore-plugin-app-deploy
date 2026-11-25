@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Plugin de déploiement d’applications en un clic",
+    "description": "Ce plugin assure un déploiement réel d’applications en un clic : 9 modèles intégrés (dont Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma) lancent des conteneurs via la CLI docker de l’hôte (argv fixe, sans shell). Les enregistrements sont stockés dans `<state>/deployments.json` (0600) ; `list` est croisé avec `docker ps` pour afficher l’état réel et un aperçu des ressources. Les applications déployées peuvent être arrêtées, démarrées et journalisées ; `remove` exige `confirm=true` explicite et ne supprime que les conteneurs créés par ce plugin.",
+    "detail": "docs/DETAIL.fr.md"
+  }
+}

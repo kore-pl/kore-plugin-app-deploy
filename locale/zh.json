@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "应用一键部署插件",
+    "description": "本插件提供真实的一键应用部署：内置 9 个模板（含 Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma），通过宿主机的 docker CLI（固定 argv、不经 shell）拉起容器。部署记录落 `<state>/deployments.json`（0600），`list` 关联 `docker ps` 查询真实运行状态并附带资源占用概览；部署后可直接停止、启动、查看日志；`remove` 必须显式 `confirm=true`，且只删除本插件创建的容器。",
+    "detail": "docs/DETAIL.md"
+  }
+}

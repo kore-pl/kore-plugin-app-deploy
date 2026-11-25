@@ -1,5 +1,7 @@
 # kore-plugin-app-deploy
 
+语言：[简体中文](docs/DETAIL.md) · [English](docs/DETAIL.en.md) · [Español](docs/DETAIL.es.md) · [Français](docs/DETAIL.fr.md) · [Deutsch](docs/DETAIL.de.md) · [Русский](docs/DETAIL.ru.md) · [Português](docs/DETAIL.pt.md)
+
 一键部署应用插件（**真实部署**）：内置 9 个模板（含 Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma），通过本机 docker CLI（固定 argv、**不经 shell**）拉起容器；部署记录落 `<state>/deployments.json`（0600），`list` 关联 `docker ps` 查真实状态并附资源占用概览，部署后可直接`停止`/`启动`/`看日志`，`remove` 必须 `confirm` 且**只删本插件创建的容器**。
 
 ## 协议面
@@ -143,3 +145,7 @@ E2E 覆盖：`templates` 返回 9 个模板 → `deploy nginx-static` 后容器 
 - **相关仓库**：[索引 kore-plugins](https://github.com/kore-pl/kore-plugins) · [协议文档](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-PROTOCOL.md) · [SDK 指南](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-SDK.md)
 
 <!-- oss:end -->
+
+## 支持本项目
+
+如果这个项目对你有帮助，欢迎在 GitHub 仓库右上角点个 ⭐ Star——你的支持是作者持续维护的动力。也欢迎提 issue、PR 或参与讨论。

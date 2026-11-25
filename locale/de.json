@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Plugin für die Bereitstellung von Anwendungen mit einem Klick",
+    "description": "Dieses Plugin bietet echte Bereitstellung von Anwendungen mit einem Klick: 9 integrierte Vorlagen (u. a. Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma) starten Container über die docker-CLI des Hosts (festes argv, keine Shell). Bereitstellungsdatensätze liegen in `<state>/deployments.json` (0600); `list` wird mit `docker ps` verknüpft, um den echten Laufzeitstatus und eine Ressourcenübersicht zu liefern. Bereitgestellte Anwendungen können gestoppt, gestartet und protokolliert werden; `remove` erfordert ein explizites `confirm=true` und löscht nur von diesem Plugin erstellte Container.",
+    "detail": "docs/DETAIL.de.md"
+  }
+}

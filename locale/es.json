@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Complemento de despliegue de aplicaciones en un clic",
+    "description": "Este complemento ofrece despliegue real de aplicaciones en un clic: 9 plantillas integradas (Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma) inician contenedores mediante la CLI de docker del host (argv fijo, sin shell). Los registros se guardan en `<state>/deployments.json` (0600); `list` se cruza con `docker ps` para mostrar el estado real y un resumen de recursos. Las aplicaciones desplegadas pueden detenerse, iniciarse y consultar sus registros; `remove` exige `confirm=true` explícito y solo elimina contenedores creados por este complemento.",
+    "detail": "docs/DETAIL.es.md"
+  }
+}

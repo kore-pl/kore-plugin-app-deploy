@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Plugin de implantação de aplicações em um clique",
+    "description": "Este plugin oferece implantação real de aplicações em um clique: 9 modelos integrados (incluindo Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma) iniciam contêineres pela CLI do docker do host (argv fixo, sem shell). Os registros ficam em `<state>/deployments.json` (0600); `list` é cruzado com `docker ps` para mostrar o estado real e um resumo de recursos. As aplicações implantadas podem ser paradas, iniciadas e ter seus logs consultados; `remove` exige `confirm=true` explícito e só exclui contêineres criados por este plugin.",
+    "detail": "docs/DETAIL.pt.md"
+  }
+}

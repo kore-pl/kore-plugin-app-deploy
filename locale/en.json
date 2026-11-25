@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "One-click app deployment plugin",
+    "description": "This plugin provides real one-click application deployment: 9 built-in templates (including Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma) start containers through the host’s docker CLI (fixed argv, no shell). Deployment records are stored in `<state>/deployments.json` (0600); `list` joins with `docker ps` to report real runtime state plus a resource usage overview. Deployed applications can be stopped, started, and logged; `remove` requires an explicit `confirm=true` and only deletes containers created by this plugin.",
+    "detail": "docs/DETAIL.en.md"
+  }
+}
