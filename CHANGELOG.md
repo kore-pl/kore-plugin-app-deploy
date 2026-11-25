@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 (2026-11-25)
+
+- docs(l10n): 新增 zh/en/es/fr/de/ru/pt 七语 locale 与 docs/DETAIL 文档，README 顶部加语言切换行（无日语、无 ja 文件）
+- docs(oss): 补齐 .github/dependabot.yml（npm + github-actions weekly）、.github/CODEOWNERS、SECURITY.en.md 忠实译文
+- docs(contributing): 补 Git Flow 分支模型、kebab-case 命名与 SSH 签名约定；README 增加中文 star 提示
+
 ## 0.4.0 (2026-11-25)
 
 - feat(templates): 内置模板 4 → **9 个**，新增 `node-app`（node:20-alpine）、`python-app`（python:3.12-alpine）、`php-site`（php:8.3-apache）、`mysql-phpmyadmin`（mysql:8 + phpmyadmin:5 双容器）、`uptime-kuma`。每条模板带对外端口/环境变量/数据卷默认值与中文说明；既有 4 个模板**保持原位**（老用户看到的顺序与默认端口不变），新模板追加在后
