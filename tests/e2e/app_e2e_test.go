@@ -21,8 +21,9 @@ type e2eTemplates struct {
 		Image             string `json:"image"`
 		EstimatedMemoryMB int    `json:"estimated_memory_mb"`
 		Ports             []struct {
-			ContainerPort int `json:"container_port"`
-			DefaultHost   int `json:"default_host_port"`
+			ContainerPort     int `json:"container_port"`
+			DefaultHost       int `json:"default_host_port"`
+			SuggestedHostPort int `json:"suggested_host_port"`
 		} `json:"ports"`
 		Volumes []struct {
 			Name          string `json:"name"`
@@ -62,6 +63,11 @@ type e2eDeploy struct {
 
 type e2eList struct {
 	Deployments []struct {
+		Usage *struct {
+			CPUPercent    float64 `json:"cpu_percent"`
+			MemUsedBytes  int64   `json:"mem_used_bytes"`
+			MemLimitBytes int64   `json:"mem_limit_bytes"`
+		} `json:"usage"`
 		Name       string `json:"name"`
 		Template   string `json:"template"`
 		Status     string `json:"status"`
@@ -84,6 +90,21 @@ type e2eRemove struct {
 	Warnings   []string `json:"warnings"`
 }
 
+type e2eControl struct {
+	Name       string   `json:"name"`
+	Action     string   `json:"action"`
+	Status     string   `json:"status"`
+	Containers []string `json:"containers"`
+}
+
+type e2eLogs struct {
+	Service   string   `json:"service"`
+	Container string   `json:"container"`
+	Tail      int      `json:"tail"`
+	Lines     []string `json:"lines"`
+	Truncated bool     `json:"truncated"`
+}
+
 // TestAppDeployDockerE2E 真实 docker 全流程：模板 → nginx 部署 → curl → list → wordpress 双容器
 // → curl → 端口冲突 → 非本插件容器护栏 → remove confirm 护栏 → 清理。
 func TestAppDeployDockerE2E(t *testing.T) {
@@ -98,7 +119,17 @@ func TestAppDeployDockerE2E(t *testing.T) {
 	cleanTestResources(t)
 	t.Cleanup(func() { cleanTestResources(t) })
 
+	// 部署根默认 t.TempDir()（/tmp）。但 docker daemon 若使用私有 temp 命名空间，
+	// 它看不到宿主 /tmp，bind 挂载会挂成空目录（nginx 直接 403）。这类环境用
+	// KORE_APP_E2E_ROOT 指一个 daemon 可见的目录（如仓库下的临时目录），跑完即删。
 	root := t.TempDir()
+	if custom := os.Getenv("KORE_APP_E2E_ROOT"); custom != "" {
+		if err := os.MkdirAll(custom, 0o755); err != nil {
+			t.Fatalf("创建 KORE_APP_E2E_ROOT 失败: %v", err)
+		}
+		root = custom
+		t.Cleanup(func() { _ = os.RemoveAll(custom) })
+	}
 	stateDir := filepath.Join(root, "state")
 	binary := buildPlugin(t)
 	socket := filepath.Join(t.TempDir(), "app-deploy.sock")
@@ -118,10 +149,10 @@ func TestAppDeployDockerE2E(t *testing.T) {
 	if err := json.Unmarshal([]byte(templatesRaw), &templates); err != nil {
 		t.Fatalf("解析 templates 失败: %v", err)
 	}
-	if templates.Count != 4 || len(templates.Templates) != 4 {
-		t.Fatalf("模板数量=%d/%d，期望 4", templates.Count, len(templates.Templates))
+	if templates.Count != 9 || len(templates.Templates) != 9 {
+		t.Fatalf("模板数量=%d/%d，期望 9", templates.Count, len(templates.Templates))
 	}
-	wantIDs := []string{"nginx-static", "wordpress", "redis", "postgres"}
+	wantIDs := []string{"nginx-static", "wordpress", "redis", "postgres", "node-app", "python-app", "php-site", "mysql-phpmyadmin", "uptime-kuma"}
 	for i, id := range wantIDs {
 		if templates.Templates[i].ID != id {
 			t.Fatalf("模板 %d id=%q，期望 %q", i, templates.Templates[i].ID, id)
@@ -132,6 +163,10 @@ func TestAppDeployDockerE2E(t *testing.T) {
 		}
 		if len(tpl.Ports) == 0 || len(tpl.Volumes) == 0 {
 			t.Fatalf("模板 %s 缺 ports/volumes: %+v", id, tpl)
+		}
+		// 0.4.0 起每条件端口都带「此刻可用」的建议宿主机端口（1024 以上非特权端口）。
+		if tpl.Ports[0].SuggestedHostPort < 1024 {
+			t.Fatalf("模板 %s 缺少可用端口建议: %+v", id, tpl.Ports[0])
 		}
 	}
 	// wordpress 的 env 必须带 label/help（UI 需要），postgres 必须有必填项。
@@ -189,7 +224,7 @@ func TestAppDeployDockerE2E(t *testing.T) {
 		t.Fatalf("容器缺少管理标签: %q", label)
 	}
 
-	body := waitHTTP200(t, nginx.AccessURL, "kore app-deploy", 60*time.Second)
+	body := waitHTTP200(t, nginx.AccessURL, "Kore", 60*time.Second)
 	t.Logf("E2E_CURL_NGINX url=%s status=200 body=%q", nginx.AccessURL, truncate(body, 200))
 
 	// 部署记录：文件存在、0600、内容含本次部署。
@@ -222,6 +257,63 @@ func TestAppDeployDockerE2E(t *testing.T) {
 	if listed.Count != 1 || listed.Deployments[0].Status != "running" {
 		t.Fatalf("list 状态不符: %+v", listed)
 	}
+
+	// 3b) 0.4.0 部署后管理：停止 → exited → 启动 → running（真实 docker stop/start）。
+	stopRaw := mustCall(t, conn, "e2e-stop", "app-deploy.stop", map[string]any{"name": "kore-app-test"})
+	t.Logf("E2E_STOP_JSON %s", stopRaw)
+	var stopped e2eControl
+	if err := json.Unmarshal([]byte(stopRaw), &stopped); err != nil {
+		t.Fatalf("解析 stop 失败: %v", err)
+	}
+	if stopped.Action != "stop" || stopped.Status != "exited" || len(stopped.Containers) != 1 {
+		t.Fatalf("stop 结果不符: %+v", stopped)
+	}
+	waitDockerState(t, "kore-app-test", "exited", 30*time.Second)
+	var stoppedList e2eList
+	if err := json.Unmarshal([]byte(mustCall(t, conn, "e2e-list-stopped", "app-deploy.list", map[string]any{})), &stoppedList); err != nil {
+		t.Fatalf("解析停止后 list 失败: %v", err)
+	}
+	if stoppedList.Deployments[0].Status != "exited" {
+		t.Fatalf("停止后 list 状态=%q，期望 exited", stoppedList.Deployments[0].Status)
+	}
+
+	startRaw := mustCall(t, conn, "e2e-start", "app-deploy.start", map[string]any{"name": "kore-app-test"})
+	t.Logf("E2E_START_JSON %s", startRaw)
+	var started e2eControl
+	if err := json.Unmarshal([]byte(startRaw), &started); err != nil {
+		t.Fatalf("解析 start 失败: %v", err)
+	}
+	if started.Action != "start" || started.Status != "running" {
+		t.Fatalf("start 结果不符: %+v", started)
+	}
+	waitDockerState(t, "kore-app-test", "running", 30*time.Second)
+	// 重启后再打一次首页，确保访问日志落在本次日志窗口内（重启本身会刷很多 worker 行）。
+	waitHTTP200(t, nginx.AccessURL, "Kore", 60*time.Second)
+
+	// 3c) 日志：上面这次 curl 已产生 nginx 访问日志，读回复的应是真实 stdout。
+	logsRaw := mustCall(t, conn, "e2e-logs", "app-deploy.logs", map[string]any{"name": "kore-app-test", "tail": 200})
+	t.Logf("E2E_LOGS_JSON %s", truncate(logsRaw, 600))
+	var logs e2eLogs
+	if err := json.Unmarshal([]byte(logsRaw), &logs); err != nil {
+		t.Fatalf("解析 logs 失败: %v", err)
+	}
+	if logs.Container != "kore-app-test" || logs.Service != "web" || logs.Tail != 200 {
+		t.Fatalf("logs 身份字段不符: %+v", logs)
+	}
+	if len(logs.Lines) == 0 || !strings.Contains(strings.Join(logs.Lines, "\n"), "GET /") {
+		t.Fatalf("logs 未返回 nginx 访问日志: %+v", logs.Lines)
+	}
+
+	// 3d) 资源占用：docker stats 采到的用量必须非零（限额来自模板 128 MiB）。
+	var usageList e2eList
+	if err := json.Unmarshal([]byte(mustCall(t, conn, "e2e-list-usage", "app-deploy.list", map[string]any{})), &usageList); err != nil {
+		t.Fatalf("解析带用量的 list 失败: %v", err)
+	}
+	usage := usageList.Deployments[0].Usage
+	if usage == nil || usage.MemUsedBytes <= 0 || usage.MemLimitBytes != 134217728 {
+		t.Fatalf("资源占用概览不符: %+v", usage)
+	}
+	t.Logf("E2E_USAGE cpu=%.2f mem=%d limit=%d", usage.CPUPercent, usage.MemUsedBytes, usage.MemLimitBytes)
 
 	// 4) 端口冲突：用同一个宿主端口再部署一次 → E_CONFLICT。
 	expectError(t, conn, "e2e-port-conflict", "app-deploy.deploy", map[string]any{

@@ -326,9 +326,9 @@ var bindSeeds = map[string]bindSeed{
 		render: func(deployment string) string {
 			return strings.Join([]string{
 				"<!doctype html>",
-				`<html lang="zh-CN"><head><meta charset="utf-8"><title>Kore app-deploy</title></head>`,
+				`<html lang="zh-CN"><head><meta charset="utf-8"><title>Kore 应用部署示例</title></head>`,
 				"<body><h1>Kore</h1>",
-				"<p>nginx-static / " + deployment + "</p>",
+				"<p>静态站点已就绪：" + deployment + "</p>",
 				"<p>把站点文件放进本目录即可替换此页。</p>",
 				"</body></html>",
 				"",
