@@ -1,14 +1,15 @@
 # kore-plugin-app-deploy
 
-一键部署应用插件（**真实部署**）：内置 4 个模板，通过本机 docker CLI（固定 argv、**不经 shell**）拉起容器；部署记录落 `<state>/deployments.json`（0600），`list` 关联 `docker ps` 查真实状态，`remove` 必须 `confirm` 且**只删本插件创建的容器**。
+一键部署应用插件（**真实部署**）：内置 9 个模板（含 Node.js / Python / PHP / MySQL+phpMyAdmin / Uptime Kuma），通过本机 docker CLI（固定 argv、**不经 shell**）拉起容器；部署记录落 `<state>/deployments.json`（0600），`list` 关联 `docker ps` 查真实状态并附资源占用概览，部署后可直接`停止`/`启动`/`看日志`，`remove` 必须 `confirm` 且**只删本插件创建的容器**。
 
 ## 协议面
 
 - `kore.plugin.v1`，`lifecycle=lazy`，`depth_level=production`（生产级 12 之一）
 - 能力声明：`system:admin`（需要本机 docker CLI 与 daemon 访问权限）
-- 方法（8 个业务方法，域必须等于插件 id `app-deploy`，PLUGIN-PROTOCOL §7.2）：
+- 方法（11 个业务方法，域必须等于插件 id `app-deploy`，PLUGIN-PROTOCOL §7.2）：
   - 模板部署：`app-deploy.templates` / `app-deploy.deploy` / `app-deploy.list` / `app-deploy.remove`
   - 用户应用包（0.3.0）：`app-deploy.upload` / `app-deploy.deployFromArtifact` / `app-deploy.upgrade` / `app-deploy.jobs`
+  - 部署后管理（0.4.0）：`app-deploy.stop` / `app-deploy.start` / `app-deploy.logs`
 - 握手的 stdout 留给协议帧，日志一律写 stderr
 - **0.2.0 破坏性变更**：`app-deploy.create`（骨架占位）移除，由 `app-deploy.deploy` 取代；模板集合由 `wordpress/laravel/nextjs` 骨架改为 4 个可真实部署的模板（minor bump，无存量用户不做兼容层）
 
@@ -20,15 +21,22 @@
 | `wordpress` | `wordpress:6` + `mysql:8` | 2（web + db） | 18091→80 | `html` / `data`（命名卷） | —（口令留空自动生成） | 512 + 512 MiB |
 | `redis` | `redis:7-alpine` | 1（server） | 16379→6379 | `data`（命名卷，AOF） | — | 256 MiB |
 | `postgres` | `postgres:16-alpine` | 1（db） | 15432→5432 | `data`（命名卷） | `POSTGRES_PASSWORD` | 512 MiB |
+| `node-app` | `node:20-alpine` | 1（web） | 18092→3000 | `app`（bind，自带示例 `server.js`） | — | 256 MiB |
+| `python-app` | `python:3.12-alpine` | 1（web） | 18093→8000 | `app`（bind，自带示例 `app.py`） | — | 256 MiB |
+| `php-site` | `php:8.3-apache` | 1（web） | 18094→80 | `html`（bind，自带示例 `index.php`） | — | 256 MiB |
+| `mysql-phpmyadmin` | `mysql:8` + `phpmyadmin:5` | 2（db + web） | 18095→80、13306→3306 | `data`（命名卷） | `MYSQL_ROOT_PASSWORD` | 512 + 256 MiB |
+| `uptime-kuma` | `louislam/uptime-kuma:1` | 1（web） | 18096→3001 | `data`（命名卷） | — | 512 MiB |
 
 `templates` 每项返回 `{id, name, description, image, ports[], volumes[], env[{key,label,required,default,help}], estimated_memory_mb}`，另带 `services[]`（多容器模板的服务清单：镜像 + 内存限额）与 `env[].secret`（是否口令、留空是否自动生成）。
+
+`ports[]` 自 0.4.0 起额外带 `suggested_host_port`：读取时现算的「此刻可用」端口（跳过运行中容器已发布的端口与本机绑定失败的端口，从 `default_host_port` 向上找第一个可用值）。`templates` 因此会读一次 `docker ps` 快照；docker 不可用时降级为「只按本机探测」，模板目录照常返回。bind 挂载会写入示例入口（已有同名文件不覆盖），保证「部署成功 → 打开就有页面」而不是 403 / 白页 / 容器退出。
 
 ## 方法语义
 
 ```bash
 # 模板目录
 {"method":"app-deploy.templates","params":{}}
-# → {"templates":[...],"count":4}
+# → {"templates":[...],"count":9}
 
 # 真部署（name 即容器名，必须以 kore-app- 开头）
 {"method":"app-deploy.deploy",
@@ -61,6 +69,15 @@
 
 artifact 部署记录使用模板标识 `artifact`（不走内置模板白名单：包内容由用户自己负责，容器仍只由模板 `deploy` 创建）。
 
+### 部署后管理方法（0.4.0）
+
+| 方法 | 入参 | 结果要点 |
+| --- | --- | --- |
+| `app-deploy.stop` / `app-deploy.start` | `{name}` | 只按**部署记录里的容器名**批量停止/启动：`{name,action:stop\|start,status:exited\|running,containers:[…]}`；对已在目标状态的容器是幂等成功；**不改写部署记录**（记录的 `status` 只是历史值，对外状态一律按 `docker ps` 现算） |
+| `app-deploy.logs` | `{name, service?, tail?}` | 读主容器（或指定服务）最近 `tail` 行日志：`{name,service,container,tail,lines:[…],truncated}`；stdout 与 stderr 合并（应用把错误打到 stderr 是最常见的情形）；`tail` 缺省 200、上限 2000，单次最多回 64 KiB，超限只保留尾部并置 `truncated:true`；只读，不动容器、不改记录 |
+
+控制面是执行面的**可选能力**（`Controller` 接口）：执行面不支持时上述三个方法返回 `E_UNSUPPORTED` 并写明缺什么，不做静默降级。`list` 里的资源占用（`usage{cpu_percent,mem_used_bytes,mem_limit_bytes}`）来自一次 `docker stats --no-stream`，采样失败时列表照常返回、原因放进 `usage_error`（不假装「不占资源」）。
+
 ## 安全设计
 
 1. **模板白名单**：镜像只出现在源码常量里，`deploy` 只接受模板 id；`image` / `cmd` 等额外字段被忽略，无法 `docker run evil/image`。
@@ -71,6 +88,7 @@ artifact 部署记录使用模板标识 `artifact`（不走内置模板白名单
 6. **内存限额**：每个容器都带 `--memory` 与等值的 `--memory-swap`（禁 swap），防止单个部署用 swap 顶过限额把宿主机拖进 OOM。
 7. **卷受限**：命名卷由 docker 管理；bind 卷只落在 `<state>/volumes/<name>/<子目录>` 内，**不接受任意宿主机路径**（`volumes` 参数只能改子目录名）。
 8. **失败回滚**：任一容器启动失败或记录写入失败 → 删除已建容器与网络、不写记录，不留半拉部署。
+9. **控制面同样只认记录**：`stop` / `start` / `logs` 只按部署记录里的容器名操作（名字带 `kore-app-` 前缀），不接受任意容器名/ID，也不会去动别人的容器。
 
 ## 状态与运行期配置
 
@@ -95,14 +113,14 @@ artifact 部署记录使用模板标识 `artifact`（不走内置模板白名单
 ```bash
 gofmt -l . && go vet ./... && go test -timeout 200s ./...
 make build && make dist
-tar -tzf dist/app-deploy-0.3.3.tar.gz | head -1   # info.json
+tar -tzf dist/app-deploy-0.4.0.tar.gz | head -1   # info.json
 
 # 真 docker E2E（默认跳过；开启后缺 docker 会失败而不是跳过）
 make e2e
 docker ps -a --filter name=kore-app- --format '{{.Names}}'   # 清理后应为空
 ```
 
-E2E 覆盖：`templates` 返回 4 个模板 → `deploy nginx-static` 后容器 running 且 `curl` 首页 200 → `list` 显示 running → `deploy wordpress` 双容器 running 且 `curl` 首页 200（WordPress 安装页）→ 端口冲突 `E_CONFLICT` → 非本插件容器 `E_UNAUTHORIZED` → `remove` 缺 confirm `E_INVALID` → `remove` 带 confirm 后容器/命名卷/网络/记录全部清理。
+E2E 覆盖：`templates` 返回 9 个模板 → `deploy nginx-static` 后容器 running 且 `curl` 首页 200 → `list` 显示 running → `deploy wordpress` 双容器 running 且 `curl` 首页 200（WordPress 安装页）→ 端口冲突 `E_CONFLICT` → 非本插件容器 `E_UNAUTHORIZED` → `remove` 缺 confirm `E_INVALID` → `remove` 带 confirm 后容器/命名卷/网络/记录全部清理。
 
 `dist` 使用确定性参数归档（`--sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner` + `gzip -9n`，chmod 归一），重复构建 sha256 不变；`size_bytes` 由提交前实测包体积回填源清单。
 
@@ -121,7 +139,7 @@ E2E 覆盖：`templates` 返回 4 个模板 → `deploy nginx-static` 后容器 
 - **行为准则**：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 - **兼容性**：`protocol: kore.plugin.v1` · `requires_kore: >=0.1.0 <0.2.0` · `lifecycle: lazy` · 深度等级 `production`。
 - **验证方式**：本地 `make check` 优先（CI 只在 push main / tag / PR / 手动跑；发布前 `make dist` 连跑两次核对 sha 一致）。
-- **发布产物**：`make dist` → `dist/app-deploy-0.3.3.tar.gz` + `.sha256`（位级可复现，连跑两次 sha 相同）。
+- **发布产物**：`make dist` → `dist/app-deploy-0.4.0.tar.gz` + `.sha256`（位级可复现，连跑两次 sha 相同）。
 - **相关仓库**：[索引 kore-plugins](https://github.com/kore-pl/kore-plugins) · [协议文档](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-PROTOCOL.md) · [SDK 指南](https://github.com/kore-pl/kore/blob/main/docs/PLUGIN-SDK.md)
 
 <!-- oss:end -->

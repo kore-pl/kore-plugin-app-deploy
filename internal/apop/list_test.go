@@ -3,6 +3,7 @@ package apop
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/pengtang1024/kore/pkg/pluginapi"
@@ -94,6 +95,48 @@ func TestListCorruptState(t *testing.T) {
 		t.Fatalf("写坏文件失败: %v", err)
 	}
 	callErr(t, rt, "app-deploy.list", `{}`, pluginapi.E_INTERNAL)
+}
+
+// TestListUsageSummary 覆盖资源占用概览：聚合到部署级、停止后不再显示、采样失败要可见。
+func TestListUsageSummary(t *testing.T) {
+	exec := newFakeExecutor()
+	rt := testRuntime(t, exec)
+	callOK(t, rt, "app-deploy.deploy", `{"template":"wordpress","name":"kore-app-wp"}`)
+	exec.setUsage("kore-app-wp", ContainerUsage{Name: "kore-app-wp", CPUPercent: 1.5, MemUsedBytes: 64 << 20, MemLimitBytes: 512 << 20})
+	exec.setUsage("kore-app-wp-db", ContainerUsage{Name: "kore-app-wp-db", CPUPercent: 0.5, MemUsedBytes: 128 << 20, MemLimitBytes: 512 << 20})
+
+	view := listOne(t, rt, "kore-app-wp")
+	if view.Usage == nil {
+		t.Fatal("运行中的部署应带 usage 概览")
+	}
+	if view.Usage.CPUPercent != 2.0 {
+		t.Fatalf("CPU 聚合=%.2f，期望 2.00", view.Usage.CPUPercent)
+	}
+	if view.Usage.MemUsedBytes != 192<<20 || view.Usage.MemLimitBytes != 1024<<20 {
+		t.Fatalf("内存聚合不符: used=%d limit=%d", view.Usage.MemUsedBytes, view.Usage.MemLimitBytes)
+	}
+
+	// 采样失败：列表照常返回，但必须把原因说出来（不能假装不占资源）。
+	exec.usageErr = NewFaultError(FaultTimeout, "docker stats 超时")
+	var res ListResult
+	if err := json.Unmarshal([]byte(callOK(t, rt, "app-deploy.list", "{}")), &res); err != nil {
+		t.Fatalf("解析 list 失败: %v", err)
+	}
+	if res.UsageError == "" || !strings.Contains(res.UsageError, "资源占用暂不可用") {
+		t.Fatalf("采样失败应回 usage_error，实际 %q", res.UsageError)
+	}
+	for _, view := range res.Deployments {
+		if view.Usage != nil {
+			t.Fatalf("采样失败时不应带 usage: %+v", view.Usage)
+		}
+	}
+
+	// 全部停止后不再采样（也不该显示占用）。
+	exec.usageErr = nil
+	callOK(t, rt, "app-deploy.stop", `{"name":"kore-app-wp"}`)
+	if got := listOne(t, rt, "kore-app-wp"); got.Usage != nil {
+		t.Fatalf("停止后不应带 usage: %+v", got.Usage)
+	}
 }
 
 // listOne 调用 list 并取出指定部署的视图。

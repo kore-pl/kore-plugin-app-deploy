@@ -62,6 +62,12 @@ func (r *Runtime) Call(method string, params json.RawMessage) (json.RawMessage, 
 		return r.callUpgrade(params)
 	case "jobs":
 		return r.callJobs(params)
+	case "stop":
+		return r.callStop(params)
+	case "start":
+		return r.callStart(params)
+	case "logs":
+		return r.callLogs(params)
 	default:
 		return nil, notFound("未知方法: " + method)
 	}
@@ -78,7 +84,8 @@ func businessVerb(method string) (string, bool) {
 	}
 	switch verb {
 	case "templates", "deploy", "list", "remove",
-		"upload", "deployFromArtifact", "upgrade", "jobs":
+		"upload", "deployFromArtifact", "upgrade", "jobs",
+		"stop", "start", "logs":
 		return verb, true
 	}
 	return "", false

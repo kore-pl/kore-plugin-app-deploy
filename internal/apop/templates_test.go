@@ -16,7 +16,8 @@ func TestBuiltinTemplatesComplete(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("解析 templates 结果失败: %v（%s）", err, raw)
 	}
-	wantIDs := []string{"nginx-static", "wordpress", "redis", "postgres"}
+	// 顺序固定：既有四个模板保持原位（老用户看到的顺序不变），新增模板追加在后。
+	wantIDs := []string{"nginx-static", "wordpress", "redis", "postgres", "node-app", "python-app", "php-site", "mysql-phpmyadmin", "uptime-kuma"}
 	if got.Count != len(wantIDs) || len(got.Templates) != len(wantIDs) {
 		t.Fatalf("模板数量=%d/%d，期望 %d", got.Count, len(got.Templates), len(wantIDs))
 	}
@@ -106,19 +107,24 @@ func TestBuiltinTemplatesComplete(t *testing.T) {
 
 // TestTemplateCatalogDetails 校验四个模板的具体内容（镜像/端口/卷）。
 func TestTemplateCatalogDetails(t *testing.T) {
+	type portWant struct{ host, container int }
 	cases := []struct {
 		id          string
 		primary     string
 		services    []string
-		hostPort    int
-		container   int
+		ports       []portWant
 		volumePath  string
 		wantService int
 	}{
-		{"nginx-static", "nginx:alpine", []string{"nginx:alpine"}, 18090, 80, "/usr/share/nginx/html", 1},
-		{"wordpress", "wordpress:6", []string{"wordpress:6", "mysql:8"}, 18091, 80, "/var/www/html", 2},
-		{"redis", "redis:7-alpine", []string{"redis:7-alpine"}, 16379, 6379, "/data", 1},
-		{"postgres", "postgres:16-alpine", []string{"postgres:16-alpine"}, 15432, 5432, "/var/lib/postgresql/data", 1},
+		{"nginx-static", "nginx:alpine", []string{"nginx:alpine"}, []portWant{{18090, 80}}, "/usr/share/nginx/html", 1},
+		{"wordpress", "wordpress:6", []string{"wordpress:6", "mysql:8"}, []portWant{{18091, 80}}, "/var/www/html", 2},
+		{"node-app", "node:20-alpine", []string{"node:20-alpine"}, []portWant{{18092, 3000}}, "/app", 1},
+		{"python-app", "python:3.12-alpine", []string{"python:3.12-alpine"}, []portWant{{18093, 8000}}, "/app", 1},
+		{"php-site", "php:8.3-apache", []string{"php:8.3-apache"}, []portWant{{18094, 80}}, "/var/www/html", 1},
+		{"mysql-phpmyadmin", "phpmyadmin:5", []string{"mysql:8", "phpmyadmin:5"}, []portWant{{18095, 80}, {13306, 3306}}, "/var/lib/mysql", 2},
+		{"redis", "redis:7-alpine", []string{"redis:7-alpine"}, []portWant{{16379, 6379}}, "/data", 1},
+		{"postgres", "postgres:16-alpine", []string{"postgres:16-alpine"}, []portWant{{15432, 5432}}, "/var/lib/postgresql/data", 1},
+		{"uptime-kuma", "louislam/uptime-kuma:1", []string{"louislam/uptime-kuma:1"}, []portWant{{18096, 3001}}, "/app/data", 1},
 	}
 	for _, c := range cases {
 		tpl := LookupTemplate(c.id)
@@ -136,12 +142,14 @@ func TestTemplateCatalogDetails(t *testing.T) {
 				t.Fatalf("模板 %s 第 %d 个服务镜像=%q，期望 %q", c.id, i, tpl.Services[i].Image, image)
 			}
 		}
-		if len(tpl.Ports) != 1 {
-			t.Fatalf("模板 %s 端口数=%d，期望 1", c.id, len(tpl.Ports))
+		if len(tpl.Ports) != len(c.ports) {
+			t.Fatalf("模板 %s 端口数=%d，期望 %d", c.id, len(tpl.Ports), len(c.ports))
 		}
-		if tpl.Ports[0].DefaultHost != c.hostPort || tpl.Ports[0].ContainerPort != c.container {
-			t.Fatalf("模板 %s 端口=%d->%d，期望 %d->%d", c.id,
-				tpl.Ports[0].DefaultHost, tpl.Ports[0].ContainerPort, c.hostPort, c.container)
+		for i, want := range c.ports {
+			if tpl.Ports[i].DefaultHost != want.host || tpl.Ports[i].ContainerPort != want.container {
+				t.Fatalf("模板 %s 第 %d 条端口=%d->%d，期望 %d->%d", c.id, i,
+					tpl.Ports[i].DefaultHost, tpl.Ports[i].ContainerPort, want.host, want.container)
+			}
 		}
 		if len(tpl.Volumes) == 0 || tpl.Volumes[0].ContainerPath != c.volumePath {
 			t.Fatalf("模板 %s 首个卷路径=%v，期望 %q", c.id, tpl.Volumes, c.volumePath)
@@ -163,6 +171,19 @@ func TestTemplateSecretsAndRequired(t *testing.T) {
 	}
 	if required != "POSTGRES_PASSWORD" {
 		t.Fatalf("postgres 必填项=%q，期望 POSTGRES_PASSWORD", required)
+	}
+	pma := LookupTemplate("mysql-phpmyadmin")
+	pmaRequired := ""
+	for _, field := range pma.Env {
+		if field.Required {
+			pmaRequired = field.Key
+			if !field.Secret || field.Default != "" {
+				t.Fatalf("mysql-phpmyadmin 必填项 %s 必须是 secret 且无默认值（用户要能知道自己的口令）", field.Key)
+			}
+		}
+	}
+	if pmaRequired != "MYSQL_ROOT_PASSWORD" {
+		t.Fatalf("mysql-phpmyadmin 必填项=%q，期望 MYSQL_ROOT_PASSWORD", pmaRequired)
 	}
 	for _, id := range []string{"wordpress"} {
 		tpl := LookupTemplate(id)

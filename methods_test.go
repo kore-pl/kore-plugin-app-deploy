@@ -28,6 +28,14 @@ func (s *stubExecutor) CreateNetwork(string) error { return nil }
 
 func (s *stubExecutor) RemoveNetwork(string) error { return nil }
 
+// 控制面：dispatch 接线用例要能走到 stop/start/logs，这里给最小实现。
+func (s *stubExecutor) StopContainers([]string) error  { return nil }
+func (s *stubExecutor) StartContainers([]string) error { return nil }
+
+func (s *stubExecutor) ContainerLogs(string, int) (string, error) { return "", nil }
+
+func (s *stubExecutor) SampleUsage([]string) ([]apop.ContainerUsage, error) { return nil, nil }
+
 // testRuntime 构造指向临时目录、端口全可用的运行时。
 func testRuntime(t *testing.T) *apop.Runtime {
 	t.Helper()
@@ -48,9 +56,12 @@ func TestDispatchMethods(t *testing.T) {
 		params string
 		want   string
 	}{
-		{"app-deploy.templates", `{}`, `"count":4`},
+		{"app-deploy.templates", `{}`, `"count":9`},
 		{"app-deploy.deploy", `{"template":"nginx-static","name":"kore-app-demo"}`, `"deployed":true`},
 		{"app-deploy.list", `{}`, `"count":1`},
+		{"app-deploy.stop", `{"name":"kore-app-demo"}`, `"action":"stop"`},
+		{"app-deploy.start", `{"name":"kore-app-demo"}`, `"action":"start"`},
+		{"app-deploy.logs", `{"name":"kore-app-demo"}`, `"lines":[]`},
 		{"app-deploy.remove", `{"name":"kore-app-demo","confirm":true}`, `"removed":true`},
 	}
 	for _, c := range cases {

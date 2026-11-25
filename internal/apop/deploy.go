@@ -38,7 +38,9 @@ func (r *Runtime) callDeploy(raw json.RawMessage) (json.RawMessage, *pluginapi.E
 	if perr != nil {
 		return nil, perr
 	}
-	deriveEnv(tpl, p.Name, envPlan)
+	if perr := deriveEnv(tpl, p.Name, envPlan); perr != nil {
+		return nil, perr
+	}
 
 	if err := ensureStateDir(r.opts.StateDir); err != nil {
 		return nil, internalErr("创建状态目录失败: " + err.Error())
@@ -310,26 +312,107 @@ func (r *Runtime) prepareVolumes(tpl *Template, deployment string, overrides []V
 	return refs, nil
 }
 
-// seedBindVolume 给 nginx 静态目录放一个占位首页：空目录会让 nginx 直接 403，
-// 首次部署看不到任何反馈；已有 index.html 时绝不覆盖。
+// bindSeed 是写进用户可见挂载目录的示例文件：空目录会让「一键部署」成功后打开是
+// 403 / 白页 / 容器直接退出（node 找不到入口就退出），用户会以为部署失败。
+type bindSeed struct {
+	fileName string
+	render   func(deployment string) string
+}
+
+// bindSeeds 按「模板 id + "/" + 卷名」登记示例文件；未登记的卷不写入任何东西。
+var bindSeeds = map[string]bindSeed{
+	"nginx-static/html": {
+		fileName: "index.html",
+		render: func(deployment string) string {
+			return strings.Join([]string{
+				"<!doctype html>",
+				`<html lang="zh-CN"><head><meta charset="utf-8"><title>Kore app-deploy</title></head>`,
+				"<body><h1>Kore</h1>",
+				"<p>nginx-static / " + deployment + "</p>",
+				"<p>把站点文件放进本目录即可替换此页。</p>",
+				"</body></html>",
+				"",
+			}, "\n")
+		},
+	},
+	"node-app/app": {
+		fileName: "server.js",
+		render: func(deployment string) string {
+			return strings.Join([]string{
+				"// Kore 应用一键部署 · Node.js 示例入口（" + deployment + "）",
+				"// 零依赖：只用 node 内置 http；改成你自己的入口后重启容器即生效。",
+				"const http = require('node:http');",
+				"const port = Number(process.env.PORT || 3000);",
+				"const server = http.createServer((req, res) => {",
+				"  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });",
+				"  res.end('<h1>Kore</h1>' +",
+				"    '<p>Node.js 示例已启动（' + req.url + '）。把 server.js 换成你的应用入口即可。</p>');",
+				"});",
+				"server.listen(port, '0.0.0.0', () => {",
+				"  console.log('Kore app-deploy: Node.js 示例监听 ' + port);",
+				"});",
+				"",
+			}, "\n")
+		},
+	},
+	"python-app/app": {
+		fileName: "app.py",
+		render: func(deployment string) string {
+			return strings.Join([]string{
+				"# Kore 应用一键部署 · Python 示例入口（" + deployment + "）",
+				"# 零依赖：只用标准库；把 app.py 换成 Flask / FastAPI 入口即可（镜像内需自带依赖）。",
+				"import http.server",
+				"import os",
+				"",
+				"",
+				"class Handler(http.server.BaseHTTPRequestHandler):",
+				"    def do_GET(self):",
+				"        body = ('<meta charset=utf-8><h1>Kore</h1>'",
+				"                '<p>Python 示例已启动（%s）。把 app.py 换成你的应用入口即可。</p>'",
+				"                % self.path).encode('utf-8')",
+				"        self.send_response(200)",
+				"        self.send_header('Content-Type', 'text/html; charset=utf-8')",
+				"        self.send_header('Content-Length', str(len(body)))",
+				"        self.end_headers()",
+				"        self.wfile.write(body)",
+				"",
+				"    def log_message(self, fmt, *args):",
+				"        print('Kore app-deploy: Python 示例 ' + (fmt % args))",
+				"",
+				"",
+				"port = int(os.environ.get('PORT', '8000'))",
+				"http.server.HTTPServer(('0.0.0.0', port), Handler).serve_forever()",
+				"",
+			}, "\n")
+		},
+	},
+	"php-site/html": {
+		fileName: "index.php",
+		render: func(deployment string) string {
+			return strings.Join([]string{
+				"<?php",
+				"// Kore 应用一键部署 · PHP 示例首页（" + deployment + "）",
+				"header('Content-Type: text/html; charset=utf-8');",
+				"$path = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '/';",
+				"echo '<meta charset=utf-8><h1>Kore</h1>';",
+				"echo '<p>PHP 示例已启动（' . htmlspecialchars($path, ENT_QUOTES) . '）。把站点文件放进本目录即可替换此页。</p>';",
+				"",
+			}, "\n")
+		},
+	},
+}
+
+// seedBindVolume 给已登记的挂载目录放一个示例文件；已有同名文件时绝不覆盖。
 func seedBindVolume(templateID, volumeName, dir, deployment string) error {
-	if templateID != "nginx-static" || volumeName != "html" {
+	seed, ok := bindSeeds[templateID+"/"+volumeName]
+	if !ok {
 		return nil
 	}
-	target := filepath.Join(dir, "index.html")
+	target := filepath.Join(dir, seed.fileName)
 	if _, err := os.Stat(target); err == nil {
 		return nil
 	}
-	page := strings.Join([]string{
-		"<!doctype html>",
-		`<html lang="zh-CN"><head><meta charset="utf-8"><title>kore app-deploy</title></head>`,
-		"<body><h1>kore app-deploy</h1>",
-		"<p>nginx-static / " + deployment + "</p>",
-		"<p>把站点文件放进本目录即可替换此页。</p>",
-		"</body></html>",
-		"",
-	}, "\n")
-	if err := os.WriteFile(target, []byte(page), 0o644); err != nil {
+	if err := os.WriteFile(target, []byte(seed.render(deployment)), 0o644); err != nil {
 		return err
 	}
 	return os.Chmod(target, 0o644)
@@ -397,24 +480,35 @@ func (r *Runtime) rollback(created []ContainerRef, network string) []string {
 	return warnings
 }
 
-// deriveEnv 为多容器模板补齐内部连接变量（目前只有 wordpress → mysql）。
-// 内部变量不暴露给用户，值来自已校验/已生成的 db 环境变量。
-func deriveEnv(tpl *Template, deployment string, plan *envPlan) {
-	if tpl.ID != "wordpress" {
-		return
+// deriveEnv 为多容器模板补齐内部连接变量（wordpress → mysql、phpmyadmin → mysql）。
+// 内部变量不在模板 env 白名单里，用户既看不到也改不了；值来自已校验/已生成的 db 环境变量
+// 与容器名（多容器模板同网段，按容器名互相解析）。
+func deriveEnv(tpl *Template, deployment string, plan *envPlan) *pluginapi.Error {
+	db, hasDB := tpl.Service("db")
+	web, hasWeb := tpl.PrimaryService()
+	if !hasDB || !hasWeb {
+		return nil
 	}
-	db, ok := tpl.Service("db")
-	if !ok {
-		return
+	switch tpl.ID {
+	case "wordpress":
+		plan.set(web.Name, "WORDPRESS_DB_HOST", containerName(deployment, db)+":3306")
+		plan.set(web.Name, "WORDPRESS_DB_NAME", plan.get(db.Name, "MYSQL_DATABASE"))
+		plan.set(web.Name, "WORDPRESS_DB_USER", plan.get(db.Name, "MYSQL_USER"))
+		plan.set(web.Name, "WORDPRESS_DB_PASSWORD", plan.get(db.Name, "MYSQL_PASSWORD"))
+	case "mysql-phpmyadmin":
+		// phpMyAdmin 用内部容器名连库；blowfish 密钥是会话加密用，随机生成、永不落盘。
+		plan.set(web.Name, "PMA_HOST", containerName(deployment, db))
+		plan.set(web.Name, "PMA_PORT", "3306")
+		if name := plan.get(db.Name, "MYSQL_DATABASE"); name != "" {
+			plan.set(web.Name, "PMA_DB_NAME", name)
+		}
+		secret, err := randomSecret()
+		if err != nil {
+			return internalErr("生成 phpMyAdmin 会话密钥失败: " + err.Error())
+		}
+		plan.set(web.Name, "PMA_BLOWFISH_SECRET", secret)
 	}
-	web, ok := tpl.PrimaryService()
-	if !ok {
-		return
-	}
-	plan.set(web.Name, "WORDPRESS_DB_HOST", containerName(deployment, db)+":3306")
-	plan.set(web.Name, "WORDPRESS_DB_NAME", plan.get(db.Name, "MYSQL_DATABASE"))
-	plan.set(web.Name, "WORDPRESS_DB_USER", plan.get(db.Name, "MYSQL_USER"))
-	plan.set(web.Name, "WORDPRESS_DB_PASSWORD", plan.get(db.Name, "MYSQL_PASSWORD"))
+	return nil
 }
 
 // templateIDs 返回内置模板 id 的展示串（错误信息用）。

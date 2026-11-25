@@ -113,6 +113,10 @@ type PortSpec struct {
 	Label         string `json:"label"`
 	// AccessPrefix 是 access_url 的 scheme 前缀，如 "http://" / "redis://"。
 	AccessPrefix string `json:"access_prefix"`
+	// SuggestedHostPort 是 app-deploy.templates 现算的「此刻可用」宿主端口：
+	// 从 DefaultHost 起跳过已被运行中容器占用与绑定失败的端口。0 表示未探测
+	// （探测失败或模板常量本身），此时调用方按 DefaultHost 处理。
+	SuggestedHostPort int `json:"suggested_host_port,omitempty"`
 }
 
 // VolumeSpec 是模板声明的一条挂载。
@@ -286,12 +290,17 @@ type DeploymentView struct {
 	OutsideInstall bool `json:"outside_install"`
 	// Hint 是 outside_install=true 时的可操作提示；正常应用为空串省略。
 	Hint string `json:"hint,omitempty"`
+	// Usage 是这条部署的聚合资源占用概览；执行面不支持采样或无运行中容器时省略。
+	Usage *UsageSummary `json:"usage,omitempty"`
 }
 
 // ListResult 是 app-deploy.list 的结构化结果。
 type ListResult struct {
 	Deployments []DeploymentView `json:"deployments"`
 	Count       int              `json:"count"`
+	// UsageError 说明本次资源占用采样为何没拿到（有值即所有部署的 usage 都为空）：
+	// 展示性数据缺失要能被看见，而不是让用户以为"应用不占资源"。
+	UsageError string `json:"usage_error,omitempty"`
 }
 
 // RemoveResult 是 app-deploy.remove 的结构化结果。
@@ -355,6 +364,69 @@ type Executor interface {
 	// CreateNetwork / RemoveNetwork 管理部署专用网络。
 	CreateNetwork(name string) error
 	RemoveNetwork(name string) error
+}
+
+// Controller 是执行面的**可选**控制能力：停止 / 启动 / 读日志 / 采样资源占用。
+//
+// 它与 Executor 分开是刻意的：Executor 是部署必经面（每个测试替身都必须实现），
+// 而控制面只服务「部署后管理」，不值得让边界 / 故障用例的替身跟着变长。Runtime
+// 用类型断言探测；不支持时返回 E_UNSUPPORTED 并写明缺什么，不做静默降级（G-16）。
+type Controller interface {
+	// StopContainers 优雅停止容器（先 SIGTERM 后 SIGKILL 由 docker 负责）。
+	StopContainers(ids []string) error
+	// StartContainers 启动已停止的容器。
+	StartContainers(ids []string) error
+	// ContainerLogs 读取单个容器最近的 tail 行日志（stdout + stderr 合并）。
+	ContainerLogs(name string, tail int) (string, error)
+	// SampleUsage 采样容器的一次性资源占用（docker stats --no-stream）。
+	SampleUsage(names []string) ([]ContainerUsage, error)
+}
+
+// ContainerUsage 是单个容器的一次性资源占用采样。
+type ContainerUsage struct {
+	Name string
+	// CPUPercent 是 docker stats 的瞬时 CPU 百分比（单核为 100%）。
+	CPUPercent float64
+	// MemUsedBytes / MemLimitBytes 是内存占用与限额（字节）。
+	MemUsedBytes  int64
+	MemLimitBytes int64
+}
+
+// UsageSummary 是一条部署（可能多容器）的聚合资源占用。
+type UsageSummary struct {
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemUsedBytes  int64   `json:"mem_used_bytes"`
+	MemLimitBytes int64   `json:"mem_limit_bytes"`
+}
+
+// controlParams 是 app-deploy.stop / app-deploy.start 的入参。
+type controlParams struct {
+	Name string `json:"name"`
+}
+
+// logsParams 是 app-deploy.logs 的入参；Service 留空取主容器。
+type logsParams struct {
+	Name    string `json:"name"`
+	Service string `json:"service"`
+	Tail    int    `json:"tail"`
+}
+
+// ControlResult 是 stop / start 的结果。
+type ControlResult struct {
+	Name       string   `json:"name"`
+	Action     string   `json:"action"`
+	Status     string   `json:"status"`
+	Containers []string `json:"containers"`
+}
+
+// LogsResult 是 app-deploy.logs 的结果：逐行返回，便于前端等宽展示与裁剪。
+type LogsResult struct {
+	Name      string   `json:"name"`
+	Service   string   `json:"service"`
+	Container string   `json:"container"`
+	Tail      int      `json:"tail"`
+	Lines     []string `json:"lines"`
+	Truncated bool     `json:"truncated"`
 }
 
 // Options 是运行期配置：由 main 从环境变量组装，测试用零值 + 注入项。

@@ -27,7 +27,63 @@ func (r *Runtime) callList(raw json.RawMessage) (json.RawMessage, *pluginapi.Err
 	for _, rec := range st.Deployments {
 		views = append(views, buildDeploymentView(rec, states, roots))
 	}
-	return encode(ListResult{Deployments: views, Count: len(views)})
+	usageErr := r.attachUsage(views)
+	return encode(ListResult{Deployments: views, Count: len(views), UsageError: usageErr})
+}
+
+// attachUsage 给运行中的部署补资源占用概览（一次 docker stats 覆盖所有容器），
+// 返回采样失败原因（有失败也要让调用方看见，不能假装"不占资源"）。
+//
+// 采样是**展示性附加数据**：执行面没有控制能力、或 docker stats 失败时，列表照常返回，
+// 只是 usage 为空并把原因放进 usage_error。停止/启动/日志不受影响。
+func (r *Runtime) attachUsage(views []DeploymentView) string {
+	ctrl, ok := r.exec.(Controller)
+	if !ok {
+		return ""
+	}
+	names := make([]string, 0, len(views))
+	for _, view := range views {
+		if view.Status != StatusRunning {
+			continue
+		}
+		for _, container := range view.Containers {
+			if container.Status == StatusRunning && container.Name != "" {
+				names = append(names, container.Name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	usages, err := ctrl.SampleUsage(names)
+	if err != nil {
+		return "资源占用暂不可用：" + err.Error()
+	}
+	byName := make(map[string]ContainerUsage, len(usages))
+	for _, usage := range usages {
+		byName[usage.Name] = usage
+	}
+	for i := range views {
+		if views[i].Status != StatusRunning {
+			continue
+		}
+		summary := UsageSummary{}
+		seen := false
+		for _, container := range views[i].Containers {
+			usage, ok := byName[container.Name]
+			if !ok {
+				continue
+			}
+			seen = true
+			summary.CPUPercent += usage.CPUPercent
+			summary.MemUsedBytes += usage.MemUsedBytes
+			summary.MemLimitBytes += usage.MemLimitBytes
+		}
+		if seen {
+			views[i].Usage = &summary
+		}
+	}
+	return ""
 }
 
 // buildDeploymentView 把一条记录与 docker 快照合成对外视图。

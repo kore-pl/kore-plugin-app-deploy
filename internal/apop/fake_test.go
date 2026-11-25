@@ -33,6 +33,13 @@ type fakeExecutor struct {
 	// failOn 指定某个容器名的 docker run 失败（验证回滚）。
 	failOn map[string]error
 
+	// ctrlErr / logsErr / usageErr 用于注入控制面错误；logs / usage 是按容器名登记的假数据。
+	ctrlErr  error
+	logsErr  error
+	usageErr error
+	logs     map[string]string
+	usage    map[string]ContainerUsage
+
 	removedContainers []string
 	removedVolumes    []string
 	removedNetworks   []string
@@ -225,6 +232,92 @@ func (f *fakeExecutor) argvJoined() string {
 		parts = append(parts, BuildRunArgs(spec)...)
 	}
 	return strings.Join(parts, " ")
+}
+
+// ── 控制面（Controller）：停止 / 启动 / 日志 / 资源占用采样 ─────────────────
+
+// StopContainers 把快照里的容器置为 exited；ctrlErr 可注入失败。
+func (f *fakeExecutor) StopContainers(ids []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "stop:"+strings.Join(ids, ","))
+	if err := f.ctrlErr; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		for i := range f.states {
+			if f.states[i].Name == id {
+				f.states[i].State = StatusExited
+			}
+		}
+	}
+	return nil
+}
+
+// StartContainers 把快照里的容器置为 running。
+func (f *fakeExecutor) StartContainers(ids []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "start:"+strings.Join(ids, ","))
+	if err := f.ctrlErr; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		for i := range f.states {
+			if f.states[i].Name == id {
+				f.states[i].State = StatusRunning
+			}
+		}
+	}
+	return nil
+}
+
+// ContainerLogs 返回按容器名登记的假日志；未登记时返回空串。
+func (f *fakeExecutor) ContainerLogs(name string, tail int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "logs:"+name)
+	if err := f.logsErr; err != nil {
+		return "", err
+	}
+	return f.logs[name], nil
+}
+
+// SampleUsage 返回按容器名登记的假资源占用。
+func (f *fakeExecutor) SampleUsage(names []string) ([]ContainerUsage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "stats:"+strings.Join(names, ","))
+	if err := f.usageErr; err != nil {
+		return nil, err
+	}
+	out := make([]ContainerUsage, 0, len(names))
+	for _, name := range names {
+		if usage, ok := f.usage[name]; ok {
+			out = append(out, usage)
+		}
+	}
+	return out, nil
+}
+
+// setLogs 登记某个容器的假日志输出。
+func (f *fakeExecutor) setLogs(name, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.logs == nil {
+		f.logs = map[string]string{}
+	}
+	f.logs[name] = body
+}
+
+// setUsage 登记某个容器的假资源占用。
+func (f *fakeExecutor) setUsage(name string, usage ContainerUsage) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.usage == nil {
+		f.usage = map[string]ContainerUsage{}
+	}
+	f.usage[name] = usage
 }
 
 // testRuntime 构造指向临时状态目录、端口全可用的 Runtime。

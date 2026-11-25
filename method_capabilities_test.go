@@ -29,12 +29,13 @@ var privilegedCapabilities = map[string]struct{}{
 
 // readOnlyVerbs 是只读业务方法：必须声明 system:read。
 var readOnlyVerbs = map[string]struct{}{
-	"templates": {}, "list": {}, "jobs": {},
+	"templates": {}, "list": {}, "jobs": {}, "logs": {},
 }
 
 // writeVerbs 是写业务方法：必须声明 system:admin。
 var writeVerbs = map[string]struct{}{
 	"deploy": {}, "remove": {}, "upload": {}, "deployFromArtifact": {}, "upgrade": {},
+	"stop": {}, "start": {},
 }
 
 func loadInfoManifest(t *testing.T) infoManifest {

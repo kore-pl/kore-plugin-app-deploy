@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 (2026-11-25)
+
+- feat(templates): 内置模板 4 → **9 个**，新增 `node-app`（node:20-alpine）、`python-app`（python:3.12-alpine）、`php-site`（php:8.3-apache）、`mysql-phpmyadmin`（mysql:8 + phpmyadmin:5 双容器）、`uptime-kuma`。每条模板带对外端口/环境变量/数据卷默认值与中文说明；既有 4 个模板**保持原位**（老用户看到的顺序与默认端口不变），新模板追加在后
+- feat(templates): `ports[]` 新增 `suggested_host_port`——读取时按 `docker ps` 已发布端口 ∪ 本机回环绑定探测现算出「此刻可用」的端口（从默认端口向上找第一个可用值），供前端标「已自动检测」；docker 不可用时降级为只按本机探测，模板目录照常返回。建议值写在深拷贝上，不污染全局模板常量
+- feat(deploy): bind 挂载写入**示例入口**避免「部署成功但打开是 403/白页/容器立刻退出」：`node-app` 落 `server.js`（内置 http 服务，零依赖）、`python-app` 落 `app.py`（标准库 http.server）、`php-site` 落 `index.php`；已有同名文件**绝不覆盖**（nginx 的 `index.html` 旧行为不变，改为表驱动）
+- feat(control): 新增 `app-deploy.stop` / `app-deploy.start` / `app-deploy.logs`——部署后管理闭环（停止/启动/看日志）。只按部署记录里的容器名操作，不改写记录；日志 stdout+stderr 合并、`tail` 缺省 200 / 上限 2000、单次 ≤64 KiB 且标记 `truncated`
+- feat(list): 每条部署带资源占用概览 `usage{cpu_percent,mem_used_bytes,mem_limit_bytes}`（一次 `docker stats --no-stream` 聚合）；采样失败列表照常返回并回 `usage_error`，不静默
+- feat(capability): `method_capabilities` 8 → 11 条——`stop`/`start` → `system:admin`，`logs` → `system:read`；控制面为执行面**可选接口**，不支持时回 `E_UNSUPPORTED` 并写明缺什么（不静默降级）
+- fix(templates): `mysql-phpmyadmin` 的 `MYSQL_ROOT_PASSWORD` 设为**必填**（phpMyAdmin 登录要用；插件不保存口令，随机生成会让用户永远登不进去）；内部连接变量 `PMA_HOST`/`PMA_PORT`/`PMA_DB_NAME` 与随机会话密钥 `PMA_BLOWFISH_SECRET` 由插件派生，不进 argv
+- test: 模板目录 9 条逐项断言（镜像/服务/端口/卷/env 完整性与顺序稳定）、端口建议两条来源（容器占用 + 探测失败）与副本隔离、docker 不可用时降级、新增模板示例入口与「不覆盖用户文件」、`mysql-phpmyadmin` 必填口令与内部变量、`stop`/`start`/`logs` 闭环与错误分类、`usage` 聚合与采样失败可见、方法级能力声明 11 条一致性
+- build: 版本 0.3.3 → 0.4.0（新增方法 + 模板集合变化，dist sha 变化必须 bump），`info.json` / `manifest.json` / README 发布产物版本同步
+
 ## 0.3.3 (2026-11-24)
 
 - fix(upgrade): 修复升级快照目录**同秒并发互相覆盖**的 P2 竞态。根因：快照目录名只有秒级时间戳 `<state>/snapshots/<name>/<UTC秒>`，同一应用同一秒两次 upgrade 撞同一路径，`os.MkdirAll` 对已存在目录返回 nil（不报错），两次 `copyTree` 互相覆盖、后写覆盖先写。首次调用 `snapshotStampFn()` 生成 `<UTC秒>` 前缀后撞名追加 `-2/-3…` 后缀（上限 64 次，超出结构化报错），用 `os.Mkdir` 原子占名——已存在则原子返回 EEXIST 而非静默成功。状态锁边界不变：仍只护 deployments/jobs JSON，快照目录占名的原子性由文件系统保证，重 IO 的 copyTree 留在锁外，不把毫秒级 JSON 临界区拖成秒级、避免撞 5s 锁超时
