@@ -160,7 +160,7 @@ func validateEnv(t *Template, provided map[string]string, generate func() (strin
 		plan.set(service.Name, field.Key, value)
 	}
 	if len(missing) > 0 {
-		return nil, invalid("缺少必填 env: " + strings.Join(missing, ", "))
+		return nil, invalid("请填写必填的环境变量 env: " + strings.Join(missing, ", "))
 	}
 	return plan, nil
 }

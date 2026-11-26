@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 (2026-11-26)
+
+### 修复（文案 / 易用性）
+
+- **必填环境变量错误文案**：`缺少必填 env:` 改为 `请填写必填的环境变量 env:`，满足 G-33 A3「invalid 文案给可操作提示」；仅改错误提示字面量，动态尾段（缺失变量名列表）与校验逻辑原样保留。
+- 版本 bump 原因：文案改动会改变二进制与 dist 包 sha；同一 `id@version` 只允许一个 sha（RELEASE §1），按 patch 递增。
+
 ## 0.4.1 (2026-11-25)
 
 - docs(l10n): 新增 zh/en/es/fr/de/ru/pt 七语 locale 与 docs/DETAIL 文档，README 顶部加语言切换行（无日语、无 ja 文件）
